@@ -1,0 +1,598 @@
+/* sidebar icon */
+#adminmenu #toplevel_page_sender-settings .wp-menu-image img {
+    padding: 9px 0 0 0;
+    width: 16px;
+}
+
+/* Settings page */
+.sender-notification {
+    padding: 11px 12px;
+    font-size: 13px;
+    line-height: 16px;
+}
+
+.sender-notification.sender-is-danger {
+    color: #b41d1d;
+    border: solid 1px #b41d1d;
+    background-color: #ffe9e9;
+}
+
+.sender-h-100 {
+    height: 100%;
+}
+
+.sender-logo {
+    height: auto;
+    max-width: 100%;
+    display: block;
+}
+
+.sender-logo:not(.sender-small) {
+    height: 40px;
+}
+
+.sender-logo.sender-small {
+    height: 32px;
+}
+
+.sender-login-image {
+    margin-bottom: 30px;
+}
+
+.sender-d-flex {
+    display: flex;
+}
+
+.sender-flex-dir-column {
+    flex-direction: column;
+}
+
+.sender-justified-between {
+    justify-content: space-between;
+}
+
+.sender-p-relative {
+    position: relative;
+}
+
+.sender-br-5 {
+    border-radius: 5px;
+}
+
+.sender-mb-20 {
+    margin-bottom: 20px;
+}
+
+.sender-option:first-child {
+    min-height: 20px;
+}
+
+.sender-container {
+    font-family: 'Roboto', sans-serif !important;
+    font-size: 14px;
+    color: #000;
+    line-height: 18px;
+    padding: 30px 20px 0 0;
+    word-break: break-word;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.sender-container * {
+    box-sizing: border-box;
+}
+
+.sender-container.sender-single-column {
+    justify-content: center;
+}
+
+.sender-container.sender-single-column .sender-flex-column {
+    width: 500px;
+}
+
+.sender-flex-column {
+    max-width: 100%;
+}
+
+.sender-flex-center-column {
+    justify-content: center;
+}
+
+@media screen and (max-width: 782px) {
+    .sender-container {
+        padding: 20px 10px 0 0;
+    }
+}
+
+.sender-label {
+    cursor: initial;
+}
+
+.sender-select-label {
+    display: inline-block;
+}
+
+.sender-logout {
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.sender-logout .sender-status-display {
+    align-items: center;
+}
+
+.sender-default-text {
+    color: #555;
+    line-height: 20px;
+}
+
+.sender-logout .sender-status-text {
+    top: 2px;
+    padding-left: 34px;
+}
+
+.sender-green-checkbox {
+    content: "";
+    height: 24px;
+    width: 24px;
+    border: 2px solid #1db44e;
+    border-radius: 50%;
+    top: 0;
+    left: 0;
+    position: absolute;
+}
+
+.sender-green-checkbox .sender-checkbox-tick {
+    height: 6px;
+    width: 10px;
+    top: 6px;
+    left: 5px;
+    border-left: 2px solid #1db44e;
+    border-bottom: 2px solid #1db44e;
+    transform: rotate(-45deg);
+    position: absolute;
+}
+
+.sender-green-checkbox .sender-checkbox-tick + span, #sender-import-text {
+    padding-left: 26px;
+}
+
+.sender-logout > div:first-child {
+    margin-right: 20px;
+}
+
+.sender-logout .sender-btn-wrap {
+    flex-grow: 1;
+    justify-content: flex-end;
+}
+
+.sender-form-thumbnail {
+    height: 100%;
+    margin-right: 20px;
+    width: 60px;
+    border: 1px solid #ccc;
+}
+
+.sender-form-thumbnail img {
+    height: 100%;
+}
+
+.sender-settings-layout {
+    max-width: 500px;
+}
+
+.sender-settings-layout > div:first-child, .sender-settings-layout > div:nth-child(2) {
+    margin-bottom: 30px;
+}
+
+.sender-cta-button {
+    background-color: #ff8d00;
+    cursor: pointer;
+    justify-content: center;
+    text-align: center;
+    white-space: nowrap;
+    height: unset;
+    font-weight: 700;
+    box-shadow: none !important;
+    outline: none !important;
+    color: #fff;
+    font-size: 14px;
+    border: none;
+}
+
+.sender-cta-button.sender-medium {
+    padding: 12px 20px;
+}
+
+.sender-cta-button.sender-large {
+    font-size: 15px;
+    padding: 15px 20px;
+    line-height: 20px;
+}
+
+.sender-cta-button:hover {
+    background-color: #ffae00;
+}
+
+.sender-cta-button:active, .sender-cta-button:focus {
+    background-color: #e67f00;
+}
+
+.sender-form-label {
+    margin-bottom: 5px;
+}
+
+input.sender-input, select.sender-woo-lists {
+    margin-left: 0;
+    margin-right: 0;
+    font-size: 13px;
+    max-width: 100%;
+}
+
+input.sender-text-input {
+    box-shadow: none !important;
+    outline: none !important;
+    padding: 7px 12px;
+    border-color: #ccc;
+    color: #000;
+    height: 40px;
+    max-width: 100%;
+}
+
+input.sender-input::-webkit-input-placeholder {
+    color: #999;
+}
+
+input.sender-input::-moz-placeholder {
+    color: #999;
+    opacity: 1;
+}
+
+input.sender-input:-moz-placeholder {
+    color: #999;
+    opacity: 1;
+}
+
+input.sender-input:-ms-input-placeholder {
+    color: #999;
+}
+
+input.sender-text-input:focus,
+input.sender-text-input:hover {
+    border-color: #aaa;
+}
+
+.sender-box.sender-api-key {
+    background: white;
+    max-width: 100%;
+    padding: 30px 30px 20px;
+    box-shadow: 0 0 5px 0 rgba(0, 0, 0, 0.15);
+}
+
+.sender-api-text {
+    font-size: 12px;
+    line-height: 17px;
+    color: #555555;
+    text-align: center;
+}
+
+a.sender-link {
+    color: #000000;
+    text-decoration: underline;
+    transition: color 0.2s;
+    box-shadow: none;
+    outline: none;
+}
+
+a.sender-link:hover {
+    color: #ff8d00;
+}
+
+.sender-header-small {
+    font-size: 16px;
+    color: #222;
+    line-height: 18px;
+}
+
+.sender-subheader {
+    font-size: 14px;
+    color: #555;
+    line-height: 22px;
+}
+
+.sender-header {
+    font-size: 16px;
+    color: #000;
+    line-height: 24px;
+    font-weight: 500;
+}
+
+.sender-big-header {
+    font-size: 32px;
+    line-height: 38px;
+    font-weight: bold;
+    margin-bottom: 20px;
+    color: #000;
+}
+
+.sender-box {
+    background: white;
+}
+
+.sender-box:not(.sender-api-key) {
+    border: 1px solid #ddd;
+    box-shadow: 0 0 4px 0 rgba(0, 0, 0, .1);
+    padding: 20px 20px 0;
+}
+
+select.sender-woo-lists:disabled {
+    opacity: 1;
+}
+
+.sender-options .sender-select-wrap select.sender-woo-lists {
+    width: 100%;
+    height: 40px;
+    border: 1px solid #cccccc;
+    background: none;
+    color: #000000;
+    padding: 7px 32px 7px 12px;
+    text-shadow: none;
+}
+
+.sender-options .sender-select-wrap .sender-woo-lists:not([disabled]):hover,
+.sender-options .sender-select-wrap .sender-woo-lists:not([disabled]):focus  {
+    border-color: #aaaaaa;
+}
+
+.sender-select-wrap {
+    height: 40px;
+}
+
+.sender-dropdown-wrap .sender-select-wrap::after {
+    height: 0;
+    width: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 5px solid #000;
+    top: 50%;
+    transform: translateY(-50%);
+    right: 12px;
+    content: " ";
+    display: block;
+    pointer-events: none;
+    position: absolute;
+}
+
+.sender-dropdown-wrap.sender-disabled .sender-select-wrap {
+    opacity: 0.7;
+}
+@-moz-document url-prefix(){
+    .sender-woo-lists{border: 1px solid #CCC; border-radius: 4px; box-sizing: border-box; position: relative; overflow: hidden;}
+    .sender-woo-lists select { width: 110%; background-position: right 30px center !important; border: none !important;}
+}
+/* For IE10 */
+select.sender-woo-lists::-ms-expand {
+    display: none !important;
+}
+select.sender-woo-lists:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.sender-checkbox {
+    position: absolute;
+    left: 0;
+    opacity: 0;
+    z-index: -1;
+}
+
+/* Text color for the label */
+label.sender-checkbox-label {
+    line-height: 18px;
+    padding-left: 30px;
+    top: 1px;
+    cursor: pointer;
+}
+
+.sender-checkbox + .sender-visible-checkbox {
+    cursor: pointer;
+    color: black;
+}
+
+/* Checkbox un-checked style */
+.sender-visible-checkbox {
+    content: '';
+    border: 1px solid #a2a0a0;
+    border-radius: 5px;
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    position: absolute;
+    left: 0;
+    top: -1px;
+}
+.sender-visible-checkbox-modal{
+    margin-right:5px!important;
+    position: relative;
+    top: 4px;
+}
+
+/* Adding a dotted border around the active tabbed-into checkbox */
+.sender-checkbox:focus + .sender-visible-checkbox,
+.sender-checkbox + .sender-visible-checkbox:hover {
+    /* Visible in the full-color space */
+    box-shadow: none;
+    outline: none;
+}
+/* Checked checkbox style (in this case the background is green #e7ffba, change this to change the color) */
+
+.sender-checkbox:checked + .sender-visible-checkbox {
+    /* NOTE: Replace the url with a path to an SVG of a checkmark to get a checkmark icon */
+    /* background-image: url('/wp-content/plugins/sender/assets/images/white_check.png'); */
+    background-repeat: no-repeat;
+    background-position: center;
+    /* The size of the checkmark icon, you may/may not need this */
+    background-size: 11px;
+    background-color: #ff8d00;
+    color: white;
+    border: 1px solid #ff8d00;
+}
+
+/* Disabled checkbox styles */
+.sender-checkbox:disabled + .sender-visible-checkbox {
+    cursor: default;
+    color: black;
+    opacity: 0.5;
+}
+
+/* widgets */
+
+.sender-widget-container {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.sender-form-title {
+    font-family: 'Roboto', sans-serif !important;
+    padding: 10px;
+    height: 32px;
+    font-weight: 500;
+    color: #000;
+    border-bottom: 1px solid #cccccc;
+    display: flex;
+    align-content: center;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+.sender-form-is-selected {
+    border: 1px solid #ff8d00 !important;
+}
+
+.sender-form-select {
+    cursor: pointer;
+    width: 125px;
+    margin: 3px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    height: 190px;
+}
+
+.sender-form-select > .sender-form-thumbnail {
+    width: 100%;
+    border: none;
+    box-sizing: border-box;
+    height: calc(100% - 52px);
+    border-radius: 5px;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: contain;
+}
+.sender-d-none {
+    display:none;
+}
+
+.sender-height-fit{
+    height: fit-content!important;
+}
+
+#sender-modal-wrapper {
+    position: fixed;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(0, 0, 0, 0.2);
+    text-align: center;
+    padding-top: 30px;
+    opacity: 0;
+    transition: 0.5s ease all;
+    z-index: 99999;
+}
+#sender-modal-wrapper.active {
+    opacity: 1;
+}
+#sender-modal-wrapper.active #sender-modal-confirmation {
+    margin-top: 0;
+    opacity: 1;
+}
+
+#sender-modal-confirmation {
+    display: inline-block;
+    margin-top: -30px;
+    opacity: 0;
+    max-width: 400px;
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);
+    background: #fff;
+    text-align: left;
+    transition: 0.5s ease all;
+}
+#sender-modal-header {
+    position: relative;
+    background: #ff8d00;
+    padding: 15px;
+    text-align: left;
+}
+#sender-modal-header h3 {
+    margin: 0;
+    color: #fff;
+}
+
+#sender-modal-close {
+    position: absolute;
+    right: 15px;
+    top: 12px;
+    font-size: 1.5em;
+    cursor: pointer;
+    color: #fff;
+}
+#sender-modal-close:hover {
+    color: black;
+}
+
+#sender-modal-content {
+    padding: 15px 15px 5px;
+}
+#sender-modal-content p {
+    margin: 0;
+    font-size: 14px;
+}
+
+#sender-modal-buttons {
+    padding: 0 15px 15px 15px;
+    text-align: right;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: space-evenly;
+    align-items: center;
+    align-content: stretch;
+}
+.sender-modal-action-btn {
+    padding: 10px 35px!important;
+}
+.sender-notice-error{
+    margin:10px auto;
+    width:25%!important;
+}
+.sender-ml-15{
+    margin-left:15px;
+}
+#sender_subscribe_to_newsletter_string{
+    width:100%;
+}
+.sender-mt-20{
+    margin-top: 20px;
+}
+.sender-submit-label-subscribe:disabled{
+    pointer-events: none;
+}
+.dashicons-sender-block-icon {
+    background: url('../assets/images/settings.png') no-repeat center center;
+    background-size: contain;
+    padding:15px;
+}
