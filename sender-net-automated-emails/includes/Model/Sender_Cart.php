@@ -15,10 +15,6 @@ class Sender_Cart extends Sender_Model
 
 	protected $user_id;
 
-	protected $user_type;
-
-	protected $session;
-
 	protected $cart_data;
 
 	protected $cart_recovered;

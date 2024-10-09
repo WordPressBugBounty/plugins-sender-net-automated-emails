@@ -24,7 +24,6 @@ jQuery(document).ready(function () {
     emailField.on('change', handleEmailFieldChange);
 });
 
-
 //TrackVisitor
 function handleTrackVisitorData(senderData) {
     if (senderData) {
@@ -32,10 +31,8 @@ function handleTrackVisitorData(senderData) {
     }
 }
 
-
 document.addEventListener('DOMContentLoaded', function () {
     if (typeof senderTrackVisitorData !== 'undefined') {
         handleTrackVisitorData(senderTrackVisitorData);
     }
 });
-

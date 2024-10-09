@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
-Tested up to: 6.6.1
+Tested up to: 6.6.2
 Requires PHP: 7.1
-Stable tag: 2.7.4
+Stable tag: 2.7.5
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -312,3 +312,6 @@ purchased
 * Site visits refactor
 = 2.7.4- 2024-08-21 =
 * Divi theme builder module added
+= 2.7.5- 2024-10-04
+* Customer track fix on form subscriptions/redirects
+* Remove visitor_id related logic

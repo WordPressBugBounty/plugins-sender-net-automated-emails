@@ -269,16 +269,6 @@ class Sender_API
         return $this->senderBuildResponse($response);
     }
 
-    public function generateVisitorId()
-    {
-        $data = ['resource_key' => $this->senderGetResourceKey()];
-        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data), 'data_format' => 'body']);
-
-        $response = wp_remote_post($this->senderStatsBaseUrl . 'get_visitor_id/', $params);
-
-        return $this->senderBuildStatsResponse($response);
-    }
-
     public function senderTrackCart(array $cartParams)
     {
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartParams)]);

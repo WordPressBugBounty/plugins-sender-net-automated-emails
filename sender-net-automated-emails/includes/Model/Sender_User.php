@@ -25,9 +25,9 @@ class Sender_User extends Sender_Model
 
 	protected $updated;
 
-	protected $visitor_id;
-
 	protected $wp_user_id;
 
     protected $sender_newsletter;
+
+    protected $sender_subscriber_id;
 }

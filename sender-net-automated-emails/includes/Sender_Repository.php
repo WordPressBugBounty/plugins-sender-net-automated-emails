@@ -23,8 +23,6 @@ class Sender_Repository
         $cartsSql = "CREATE TABLE IF NOT EXISTS $sender_carts (
                              `id` int(11) NOT NULL AUTO_INCREMENT,
                              `user_id` int(11) NOT NULL,
-                             `user_type` varchar(15),
-                             `session` varchar(50) COLLATE utf8_unicode_ci NOT NULL,
                              `cart_data` text COLLATE utf8_unicode_ci NOT NULL,
                              `cart_recovered` int(11) NOT NULL,
                              `cart_status` int(11) NOT NULL,
@@ -34,6 +32,15 @@ class Sender_Repository
                              ) $wcap_collate";
 
         $wpdb->query($cartsSql);
+
+        //Removed column on version 2.7.5. After 2-3 releases this query can be removed.
+        $remove_columns = ['user_type', 'session'];
+        foreach ($remove_columns as $column) {
+            $columnExists = $wpdb->get_results("SHOW COLUMNS FROM $sender_carts LIKE '$column'");
+            if (!empty($columnExists)) {
+                $wpdb->query("ALTER TABLE $sender_carts DROP COLUMN $column");
+            }
+        }
 
         $sender_users = $wpdb->prefix . "sender_automated_emails_users";
 
@@ -45,17 +52,17 @@ class Sender_Repository
             `created` int(11) NOT NULL,
             `updated` int(11) NOT NULL,
             `wp_user_id` int(11),
-            `visitor_id` varchar(32),
             `sender_newsletter` TINYINT(1),
+            `sender_subscriber_id` varchar(50),
             PRIMARY KEY (`id`)
             ) $wcap_collate";
 
         $wpdb->query($usersSql);
 
         $map = [
-            'visitor_id' => 'varchar(32)',
             'wp_user_id' => 'int(11)',
-            'sender_newsletter' => 'TINYINT(1)'
+            'sender_newsletter' => 'TINYINT(1)',
+            'sender_subscriber_id' => 'varchar(50)'
         ];
 
         foreach ($map as $column => $type) {
@@ -65,5 +72,10 @@ class Sender_Repository
             }
         }
 
+        //Removed column on version 2.7.5. After 2-3 releases this query can be removed.
+        $visitorColumn = $wpdb->get_results("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '$sender_users' AND column_name = 'visitor_id'");
+        if (!empty($visitorColumn)) {
+            $wpdb->query("ALTER TABLE $sender_users DROP COLUMN visitor_id");
+        }
     }
 }

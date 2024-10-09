@@ -658,7 +658,7 @@ class Sender_WooCommerce
                       INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
                       WHERE post_type = "product"');
 
-        $chunkSize = 100;
+        $chunkSize = 50;
         $productsExported = 0;
         $loopTimes = floor($productsCount / $chunkSize);
         $currency = get_option('woocommerce_currency');

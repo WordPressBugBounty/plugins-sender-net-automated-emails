@@ -19,6 +19,8 @@ class Sender_Carts
         'woocommerce_update_order_review_fragments'
     ];
 
+    const SENDER_SUBSCRIBER_ID = 'sender_subscriber_id';
+
     public function __construct($sender)
     {
         $this->sender = $sender;
@@ -350,7 +352,8 @@ class Sender_Carts
             "products" => [],
             'resource_key' => $this->senderGetResourceKey(),
             'store_id' => get_option('sender_store_register') ?: '',
-            'email' => $user->email
+            'email' => $user->email,
+            'subscriber_id' => $user->sender_subscriber_id,
         ];
 
         foreach ($items as $item => $values) {
@@ -436,7 +439,7 @@ class Sender_Carts
             return;
         }
 
-        if (!$this->senderUserId && !$this->trackUser()) {
+        if (!$this->senderUserId && !$this->trackUser() && !isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
             return;
         }
 
@@ -464,10 +467,12 @@ class Sender_Carts
                 $user = (new Sender_User())->findBy('email', $currentUser->user_email);
             }elseif($this->senderUserId){
                 $user = (new Sender_User())->find($this->senderUserId);
+            }elseif (isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])){
+                $user = (new Sender_User())->findBy('sender_subscriber_id', $_COOKIE[self::SENDER_SUBSCRIBER_ID]);
             }
 
             #find if current user has any abandoned carts
-            if (isset($user)){
+            if (!empty($user)){
                 $cart = (new Sender_Cart())->findByAttributes(
                     [
                         'user_id' => $user->id,
@@ -530,7 +535,7 @@ class Sender_Carts
 
             $newCart = new Sender_Cart();
             $newCart->cart_data = $cartData;
-            $newCart->user_id =$this->senderUserId ?: $senderUser->id;
+            $newCart->user_id = $this->senderUserId ?: $senderUser->id;
             $newCart->save();
 
             $cartData = $this->senderPrepareCartData($newCart);
@@ -541,8 +546,10 @@ class Sender_Carts
             //Guest checkout
             if ($this->senderUserId){
                 $senderUser = (new Sender_User())->find($this->senderUserId);
-                $cartData['email'] = $senderUser->email;
-                $this->sender->senderApi->senderTrackCart($cartData);
+                if ($senderUser) {
+                    $cartData['email'] = $senderUser->email;
+                    $this->sender->senderApi->senderTrackCart($cartData);
+                }
                 return;
             }
 
@@ -587,17 +594,24 @@ class Sender_Carts
 
     public function senderGetVisitor()
     {
-        $wpUser = wp_get_current_user();
-        $user = (new Sender_User())->findBy('wp_user_id', $wpUser->ID);
-
-        if (!$user) {
-            $user = new Sender_User();
-            $user->email = $wpUser->user_email;
-            $user->wp_user_id = $wpUser->ID;
-            $user->save();
+        if (is_user_logged_in()){
+            $wpUser = wp_get_current_user();
+            $user = (new Sender_User())->findBy('wp_user_id', $wpUser->ID);
+            if (!$user && isset($wpUser->user_email)) {
+                $user = new Sender_User();
+                $user->email = $wpUser->user_email;
+                $user->wp_user_id = $wpUser->ID;
+                $user->save();
+            }
+            return $user;
+        } elseif (isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
+            $senderUser = new Sender_User();
+            $senderUser->sender_subscriber_id = $_COOKIE[self::SENDER_SUBSCRIBER_ID];
+            $senderUser->save();
+            return $senderUser;
         }
 
-        return $user;
+        return false;
     }
 
     public function senderGetCart()
@@ -692,12 +706,26 @@ class Sender_Carts
     public function triggerEmailCheckout()
     {
         if (isset($_POST['email']) && !empty($_POST['email'])) {
-            $response = $this->sender->senderApi->senderTrackNotRegisteredUsers(['email' => sanitize_text_field($_POST['email'])]);
+            $sanitizedEmail = strtolower(sanitize_text_field($_POST['email']));
+            $response = $this->sender->senderApi->senderTrackNotRegisteredUsers(['email' => $sanitizedEmail]);
             if($response) {
+                $senderUser = (new Sender_User())->findBy('email', $sanitizedEmail);
+                if (!$senderUser) {
+                    $senderUser = new Sender_User();
+                    $senderUser->email = $sanitizedEmail;
+
+                    if (!$senderUser->save()) {
+                        return wp_send_json_error('Error saving user');
+                    }
+                }
+                $this->senderUserId = $senderUser->id;
+                $this->senderCartUpdated();
+
                 return wp_send_json_success($response);
             }
             return wp_send_json_error('Subscriber not created');
         }
+        return wp_send_json_error('Email is required');
     }
 
     //Use to convert carts which got confirmed payment
