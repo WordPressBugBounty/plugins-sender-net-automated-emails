@@ -389,7 +389,7 @@ class Sender_Carts
                 'qty' => $values['quantity'],
                 'image' => $image_url,
                 'product_id' => $_product->get_id(),
-                'description' => strip_tags($_product->get_description()),
+                'description' => strip_tags((string)$_product->get_description()),
             ];
 
             $data['products'][] = $prod;
