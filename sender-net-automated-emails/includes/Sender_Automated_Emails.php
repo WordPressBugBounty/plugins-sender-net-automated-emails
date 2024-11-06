@@ -90,6 +90,9 @@ class Sender_Automated_Emails
         });
 
         add_action('admin_enqueue_scripts', [$this, 'insertSdkScript']);
+        add_action('elementor/editor/before_enqueue_scripts', function() {
+            $this->insertSdkScript();
+        });
 
         add_action('widgets_init', [&$this, 'senderRegisterFormsWidget']);
 
@@ -358,10 +361,42 @@ class Sender_Automated_Emails
 
         register_widget('Sender_Forms_Widget');
 
-
         if (!class_exists('Sender_Forms_Block')) {
             require_once("Sender_Forms_Block.php");
         }
+
+        add_shortcode('sender-form', [$this,'sender_form_shortcode']);
+    }
+
+    public function sender_form_shortcode($atts)
+    {
+        $atts = shortcode_atts(
+            array(
+                'id' => ''
+            ),
+            $atts,
+            'sender-form'
+        );
+
+        $form_id = esc_attr($atts['id']);
+        if (empty($form_id)) {
+            return '';
+        }
+
+        ob_start();
+        echo '<div class="sender-form-field" data-sender-form-id="' . esc_attr($form_id) . '"></div>';
+
+        add_action('wp_print_footer_scripts', function() use ($form_id) {
+            echo '<script>
+            setTimeout(() => {
+                if (typeof senderForms !== "undefined") {
+                    senderForms.render("' . esc_attr($form_id) . '");
+                }
+            }, 1000);
+        </script>';
+        }, 20);
+
+        return ob_get_clean();
     }
 
     public function senderAddPluginLinks($links)
