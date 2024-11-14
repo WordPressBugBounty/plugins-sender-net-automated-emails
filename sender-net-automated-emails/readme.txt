@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.6.2
 Requires PHP: 7.1
-Stable tag: 2.7.7
+Stable tag: 2.7.8
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -312,10 +312,12 @@ purchased
 * Site visits refactor
 = 2.7.4- 2024-08-21 =
 * Divi theme builder module added
-= 2.7.5- 2024-10-04
+= 2.7.5- 2024-10-04 =
 * Customer track fix on form subscriptions/redirects
 * Remove visitor_id related logic
-= 2.7.6- 2024-11-06
+= 2.7.6- 2024-11-06 =
 * Fix on product description
-= 2.7.7 2024-11-06
+= 2.7.7 2024-11-06 =
 * Shortcode form [sender-form id="id"]
+= 2.7.8 2024-11-14 =
+* Pre-check subscription box on checkout option in admin panel

@@ -24,8 +24,9 @@ class Sender_Automated_Emails
         'sender_forms_data' => false,
         'sender_synced_data_date' => false,
         'sender_subscribe_label' => false,
-        'sender_subscribe_to_newsletter_string' => 'Subscribe to our newsletter',
+        'sender_subscribe_to_newsletter_string' => 'Register to our newsletter',
         'sender_forms_data_last_update' => 0,
+        'sender_checkbox_newsletter_on_checkout' => false,
     ];
 
     public $senderBaseFile;

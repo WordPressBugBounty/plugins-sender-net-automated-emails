@@ -1,4 +1,4 @@
-#Copyright (C) 2023 Sender.net
+#Copyright (C) 2024 Sender.net
 #This file is distributed under the GPLv3.
 msgid ""
 msgstr ""
@@ -10,7 +10,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "POT-Creation-Date: 2023-09-14T22:12:22+03:00\n"
-"PO-Revision-Date: 2023-09-14T22:12:22+03:00\n"
+"PO-Revision-Date: 2024-11-14T22:12:22+03:00\n"
 "X-Generator: WP-CLI 2.8.1\n"
 "X-Domain: sender-net-automated-emails\n"
 
@@ -71,8 +71,8 @@ msgid "for documentation of WooCommerce plugin"
 msgstr "para ver la documentación del plugin de WooCommerce"
 
 #: settings.php:173
-msgid "Subscribe to newsletter label"
-msgstr "Texto para suscribirse al boletín"
+msgid "Register to our newsletter"
+msgstr "Regístrate a nuestro boletín"
 
 #: settings.php:174
 msgid "Change the default text showing in cart checkouts and user account profile to your custom text."

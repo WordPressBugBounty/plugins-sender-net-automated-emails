@@ -55,15 +55,15 @@
             </form>
 
         <?php } else { ?>
-            <div class="sender-settings-layout sender-d-flex sender-flex-dir-column">
-                <div class="sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between">
-                    <div>
-                        <div class="sender-mb-20">
-                            <img src="<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/logo.svg'; ?>"
-                                 class="sender-logo sender-small" alt="Sender logo">
-                        </div>
-
+        <div class="sender-settings-layout sender-d-flex sender-flex-dir-column">
+            <div class="sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between">
+                <div>
+                    <div class="sender-mb-20">
+                        <img src="<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/logo.svg'; ?>"
+                             class="sender-logo sender-small" alt="Sender logo">
                     </div>
+
+                </div>
 
                 <div class="sender-logout sender-d-flex sender-justified-between">
                     <div class="sender-status-display sender-d-flex sender-mb-20 sender-p-relative">
@@ -193,46 +193,53 @@
                     </form>
 
                 </div>
+
                 <div class="sender-plugin-settings sender-box sender-br-5 sender-p-relative sender-mb-20">
-                    <div class="sender-header sender-mb-20"><?php _e('Subscribe to newsletter label', 'sender-net-automated-emails')?></div>
+                    <div class="sender-header sender-mb-20"><?php _e('Register to our newsletter', 'sender-net-automated-emails')?></div>
                     <p><?php _e('Change the default text showing in cart checkouts and user account profile to your custom text.', 'sender-net-automated-emails')?></p>
                     <p><strong><?php _e('Enable tracking must be active', 'sender-net-automated-emails')?></strong></p>
-                    <form method="post" class="sender-flex-dir-column sender-d-flex sender-h-100" action=''
-                          id="sender-form-settings">
+                    <form method="post" class="sender-flex-dir-column sender-d-flex sender-h-100" action='' id="sender-form-settings">
                         <div class="sender-options sender-d-flex sender-flex-dir-column">
+
                             <div class="sender-option sender-d-flex sender-p-relative sender-mb-20">
-                                <input type="hidden" value="0" name="sender_subscribe_label_hidden_checkbox">
-                                <label for="sender_subscribe_label"
-                                       class="sender-label sender-checkbox-label sender-p-relative">
-                                    <input class="sender-checkbox sender-label-subscribe" type="checkbox"
-                                           id="sender_subscribe_label"
-                                           value="sender_subscribe_label"
-                                           name="sender_subscribe_label" <?php if (get_option('sender_subscribe_label')) {
-                                        echo 'checked';
-                                    } ?> >
-                                    <span class="sender-visible-checkbox"
-                                          style="background-image: url(<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/white_check.png'; ?>)"></span>
-                                    <span><?php _e('Enable', 'sender-net-automated-emails')?></span>
+                                <input type="hidden" value="0" name="sender_subscribe_label">
+                                <label for="sender_subscribe_label" class="sender-label sender-checkbox-label sender-p-relative">
+                                    <input class="sender-checkbox sender-label-subscribe" type="checkbox" id="sender_subscribe_label"
+                                           value="1" name="sender_subscribe_label"
+                                        <?php if (get_option('sender_subscribe_label')) { echo 'checked'; } ?>>
+                                    <span class="sender-visible-checkbox" style="background-image: url(<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/white_check.png'; ?>)"></span>
+                                    <span><?php _e('Show subscription checkbox on checkout and registration pages', 'sender-net-automated-emails'); ?></span>
                                 </label>
                             </div>
+
+                            <div class="sender-option sender-d-flex sender-p-relative sender-mb-20">
+                                <input type="hidden" value="0" name="sender_checkbox_newsletter_on_checkout">
+                                <label for="sender_checkbox_newsletter_on_checkout" class="sender-label sender-checkbox-label sender-p-relative">
+                                    <input class="sender-checkbox sender-label-subscribe" type="checkbox" id="sender_checkbox_newsletter_on_checkout"
+                                           value="1" name="sender_checkbox_newsletter_on_checkout"
+                                        <?php if (get_option('sender_checkbox_newsletter_on_checkout')) { echo 'checked'; } ?>>
+                                    <span class="sender-visible-checkbox" style="background-image: url(<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/white_check.png'; ?>)"></span>
+                                    <span><?php _e('Pre-check subscription box on checkout and registration', 'sender-net-automated-emails'); ?></span>
+                                </label>
+                                <small class="sender-note"><?php _e('Requires "Show subscription checkbox" enabled.', 'sender-net-automated-emails'); ?></small>
+                            </div>
+
                             <div class="sender-option sender-mb-20">
                                 <div class="sender-subscriber-label-input">
                                     <label>
-                                        <input maxlength="255" name="sender_subscribe_to_newsletter_string"
-                                               type="text"
+                                        <input maxlength="255" name="sender_subscribe_to_newsletter_string" type="text"
                                                class="sender-input sender-text-input sender-mb-20 sender-br-5 sender-label-subscribe"
                                                id="sender_subscribe_to_newsletter_string"
                                                value="<?php echo esc_attr(get_option('sender_subscribe_to_newsletter_string')) ?>">
                                         <input type="submit" name="submit" id="submit-label-newsletter"
-                                               class="sender-cta-button sender-large sender-mb-20 sender-br-5 sender-submit-label-subscribe"
-                                               value="<?php _e('Save', 'sender-net-automated-emails')?>">
+                                               class="sender-label-subscribe sender-cta-button sender-large sender-mb-20 sender-br-5 sender-submit-label-subscribe"
+                                               value="<?php _e('Save', 'sender-net-automated-emails') ?>">
                                     </label>
                                 </div>
                             </div>
                         </div>
-                        <?php wp_nonce_field( 'sender_admin_referer' ); ?>
+                        <?php wp_nonce_field('sender_admin_referer'); ?>
                     </form>
-
                 </div>
 
                 <div class="sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between sender-mt-20">
@@ -254,17 +261,17 @@
                             <div class="sender-btn-wrap sender-d-flex">
                                 <input type="submit" name="submit" id="sender-submit-sync"
                                        class="sender-cta-button sender-medium sender-br-5 sender-height-fit"
-                                       value="<?php _e('Sync with Sender', 'sender-net-automated-emails')?>" <?php echo $disableSubmit; ?>>
+                                       value="<?php _e('Sync with Sender', 'sender-net-automated-emails') ?>" <?php echo $disableSubmit; ?>>
                                 <div class="sender-default-text" id="sender-import-text">
                                     <?php echo $noticeMessage; ?>
                                     <a target="_blank" class="sender-link"
-                                       href="https://app.sender.net/settings/connected-stores"><?php _e('See your store information', 'sender-net-automated-emails')?></a>
-                                    <span style="display: block"><?php _e('Last time synchronized:', 'sender-net-automated-emails')?> <strong
+                                       href="https://app.sender.net/settings/connected-stores"><?php _e('See your store information', 'sender-net-automated-emails') ?></a>
+                                    <span style="display: block"><?php _e('Last time synchronized:', 'sender-net-automated-emails') ?> <strong
                                                 style="display: block"><?php echo get_option('sender_synced_data_date'); ?></strong></span>
                                 </div>
                             </div>
                         </div>
-                        <?php wp_nonce_field( 'sender_admin_referer' ); ?>
+                        <?php wp_nonce_field('sender_admin_referer'); ?>
                     </form>
                 </div>
             <?php } else { ?>
@@ -326,6 +333,14 @@
 
     .select2-selection__rendered {
         margin-left: 5px !important;
+    }
+
+    .sender-note {
+        font-size: 12px;
+        color: #666;
+        margin-left: 10px;
+        display: inline-block;
+        vertical-align: middle;
     }
 
 </style>
@@ -418,4 +433,18 @@
         }
     });
 
+    var showSubscriptionCheckbox = document.getElementById('sender_subscribe_label');
+    var preCheckCheckbox = document.getElementById('sender_checkbox_newsletter_on_checkout');
+
+    preCheckCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            showSubscriptionCheckbox.checked = true;
+        }
+    });
+
+    showSubscriptionCheckbox.addEventListener('change', function() {
+        if (!this.checked) {
+            preCheckCheckbox.checked = false;
+        }
+    });
 </script>

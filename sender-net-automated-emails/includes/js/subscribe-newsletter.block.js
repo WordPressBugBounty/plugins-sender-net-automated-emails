@@ -2,8 +2,6 @@ const {__} = wp.i18n;
 const {registerBlockType} = wp.blocks;
 const el = wp.element.createElement;
 
-var sender = window.sender || {};
-
 registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
     title: __('Subscribe newsletter'),
     icon: 'sender-block-icon',
@@ -14,6 +12,7 @@ registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
     },
 
     edit: function (props) {
+        const initialChecked = window.senderNewsletter.checkboxActive === '1' || false;
         const senderNewsletterCheckbox = window.senderNewsletter.senderCheckbox || 'Subscribe to our newsletter';
         return (
             el('div', { className: 'wc-block-components-checkbox wc-block-checkout__create-account' },
@@ -22,7 +21,8 @@ registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
                         type: 'checkbox',
                         id: 'sender-newsletter-checkbox-subscribe',
                         name: 'sender-newsletter-checkbox-subscribe',
-                        className: 'wc-block-components-checkbox__input'
+                        className: 'wc-block-components-checkbox__input',
+                        checked: initialChecked,
                     }),
                     el('svg', {
                             className: 'wc-block-components-checkbox__mark',
@@ -40,6 +40,8 @@ registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
 
     save: function () {
         const senderNewsletterCheckbox = window.senderNewsletter.senderCheckbox || 'Subscribe to our newsletter';
+        const initialChecked = window.senderNewsletter.checkboxActive === '1' || false;
+
         return (
             el('div', { className: 'wc-block-components-checkbox wc-block-checkout__create-account' },
                 el('label', { htmlFor: 'sender-newsletter-checkbox-subscribe' },
@@ -47,7 +49,8 @@ registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
                         type: 'checkbox',
                         id: 'sender-newsletter-checkbox-subscribe',
                         name: 'sender-newsletter-checkbox-subscribe',
-                        className: 'wc-block-components-checkbox__input'
+                        className: 'wc-block-components-checkbox__input',
+                        checked: initialChecked,
                     }),
                     el('svg', {
                             className: 'wc-block-components-checkbox__mark',

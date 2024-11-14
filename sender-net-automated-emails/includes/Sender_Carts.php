@@ -648,19 +648,12 @@ class Sender_Carts
         if (get_option('sender_subscribe_label') && !empty(get_option('sender_subscribe_to_newsletter_string'))) {
             if (is_admin()) {
                 $emailMarketingConsent = $order->get_meta(Sender_Helper::EMAIL_MARKETING_META_KEY);
-                if (!empty($emailMarketingConsent)) {
-                    $currentValue = Sender_Helper::handleChannelStatus($emailMarketingConsent);
-                } else {
-                    $currentValue = $order->get_meta('sender_newsletter');
-                }
+                $currentValue = !empty($emailMarketingConsent) ? Sender_Helper::handleChannelStatus($emailMarketingConsent) : $order->get_meta('sender_newsletter');
+            } elseif (is_account_page() && get_current_user_id()) {
+                $emailMarketingConsent = get_user_meta(get_current_user_id(), Sender_Helper::EMAIL_MARKETING_META_KEY, true);
+                $currentValue = !empty($emailMarketingConsent) ? Sender_Helper::handleChannelStatus($emailMarketingConsent) : get_user_meta(get_current_user_id(), 'sender_newsletter', true);
             } else {
-                $emailMarketingConsent = get_user_meta(get_current_user_id(),
-                    Sender_Helper::EMAIL_MARKETING_META_KEY, true);
-                if (!empty($emailMarketingConsent)) {
-                    $currentValue = Sender_Helper::handleChannelStatus($emailMarketingConsent);
-                } else {
-                    $currentValue = get_user_meta(get_current_user_id(), 'sender_newsletter', true);
-                }
+                $currentValue = get_option('sender_checkbox_newsletter_on_checkout') ? true : false;
             }
 
             woocommerce_form_field('sender_newsletter', array(
@@ -669,6 +662,7 @@ class Sender_Carts
                 'label_class' => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
                 'input_class' => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
                 'label' => get_option('sender_subscribe_to_newsletter_string'),
+                'checked' => get_option('sender_checkbox_newsletter_on_checkout') == '1',
             ), $currentValue);
         }
     }
@@ -927,6 +921,11 @@ class Sender_Carts
             filemtime(plugin_dir_path(__FILE__) . 'js/subscribe-newsletter.block.js')
         );
 
+        $checkBoxActive = false;
+        if (get_option('sender_checkbox_newsletter_on_checkout')) {
+            $checkBoxActive = true;
+        }
+
         wp_localize_script(
             'subscribe-newsletter-block',
             'senderNewsletter',
@@ -934,6 +933,7 @@ class Sender_Carts
                 'storeId' => get_option('sender_store_register'),
                 'senderCheckbox' => $this->senderSubscribeNewsletterText(),
                 'senderAjax' => admin_url('admin-ajax.php'),
+                'checkboxActive' => $checkBoxActive ?: false,
             ]
         );
     }
