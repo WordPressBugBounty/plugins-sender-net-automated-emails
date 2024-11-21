@@ -272,36 +272,37 @@ class Sender_Automated_Emails
             ? 'https://cdn.sender.net/accounts_resources/universal.js?explicit=true'
             : 'https://cdn.sender.net/accounts_resources/universal.js';
 
-        add_action('wp_footer', function() use ($script_url, $key) {
+        ob_start();
+        ?>
+        <script>
+            (function (s, e, n, d, er) {
+                s['Sender'] = er;
+                s[er] = s[er] || function () {
+                    (s[er].q = s[er].q || []).push(arguments)
+                }, s[er].l = 1 * new Date();
+                var a = e.createElement(n),
+                    m = e.getElementsByTagName(n)[0];
+                a.async = 1;
+                a.src = d;
+                m.parentNode.insertBefore(a, m)
+            })(window, document, 'script', '<?php echo esc_url($script_url); ?>', 'sender');
+            sender('<?php echo esc_js($key); ?>');
+        </script>
+        <?php
+
+        if (get_option('sender_allow_tracking') && $this->senderIsWooEnabled() && !is_admin()) {
             ?>
             <script>
-                (function (s, e, n, d, er) {
-                    s['Sender'] = er;
-                    s[er] = s[er] || function () {
-                        (s[er].q = s[er].q || []).push(arguments)
-                    }, s[er].l = 1 * new Date();
-                    var a = e.createElement(n),
-                        m = e.getElementsByTagName(n)[0];
-                    a.async = 1;
-                    a.src = d;
-                    m.parentNode.insertBefore(a, m)
-                })(window, document, 'script', '<?php echo esc_url($script_url); ?>', 'sender');
-                sender('<?php echo esc_js($key); ?>');
+                sender('trackVisitors');
             </script>
+            <script id="sender-track-cart"></script>
+            <script id="sender-update-cart"></script>
             <?php
+        }
 
-            if (get_option('sender_allow_tracking') && $this->senderIsWooEnabled() && !is_admin()) {
-                ?>
-                <script>
-                    sender('trackVisitors');
-                </script>
-                <script id="sender-track-cart"></script>
-                <script id="sender-update-cart"></script>
-                <?php
-            }
+        $this->addSenderPluginVersion();
 
-            $this->addSenderPluginVersion();
-        });
+        echo ob_get_clean();
     }
 
     public function enqueueSenderWordpressJs()
