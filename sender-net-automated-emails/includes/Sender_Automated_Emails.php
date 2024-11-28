@@ -90,10 +90,11 @@ class Sender_Automated_Emails
             }
         });
 
-        add_action('admin_enqueue_scripts', [$this, 'insertSdkScript']);
-        add_action('elementor/editor/before_enqueue_scripts', function() {
-            $this->insertSdkScript();
-        });
+        if (is_admin()) {
+            add_action('wp_print_scripts', function () {
+                $this->insertSdkScript();
+            });
+        }
 
         add_action('widgets_init', [&$this, 'senderRegisterFormsWidget']);
 
@@ -365,7 +366,7 @@ class Sender_Automated_Emails
 
         register_widget('Sender_Forms_Widget');
 
-        if (!class_exists('Sender_Forms_Block')) {
+        if (!class_exists('Sender_Forms_Block') && !is_customize_preview()) {
             require_once("Sender_Forms_Block.php");
         }
 
