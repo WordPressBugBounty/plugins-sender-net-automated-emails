@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
-Tested up to: 6.7
+Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.8.1
+Stable tag: 2.8.2
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -327,3 +327,6 @@ purchased
 * Fix preview of forms in page builder
 = 2.8.1 2024-11-28 =
 * Fix loading script
+= 2.8.2 2024-11-20 =
+* Get currencies with applied filters from multi-currency plugins
+

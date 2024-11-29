@@ -356,7 +356,7 @@ class Sender_WooCommerce
 
         $pName = str_replace("\"", '\\"', $product->get_name());
         $pDescription = htmlspecialchars($product->get_description(), ENT_QUOTES, 'UTF-8');
-        $pCurrency = get_option('woocommerce_currency');
+        $pCurrency = get_woocommerce_currency();
         $pQty = $product->get_stock_quantity() ? $product->get_stock_quantity() : 1;
         $pRating = $product->get_average_rating();
         $pOnSale = $product->is_on_sale();
@@ -661,7 +661,7 @@ class Sender_WooCommerce
         $chunkSize = 50;
         $productsExported = 0;
         $loopTimes = floor($productsCount / $chunkSize);
-        $currency = get_option('woocommerce_currency');
+        $currency = get_woocommerce_currency();
 
         for ($x = 0; $x <= $loopTimes; $x++) {
             $productExportData = [];
@@ -726,7 +726,7 @@ class Sender_WooCommerce
                     'created_at' => $order->post_date,
                     'remoteId' => $remoteId,
                     'name' => $order->post_name,
-                    'currency' => get_option('woocommerce_currency'),
+                    'currency' => get_woocommerce_currency(),
                     'orderId' => $order->ID,
                     'email' => get_post_meta($order->ID, '_billing_email', true),
                     'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
@@ -758,7 +758,7 @@ class Sender_WooCommerce
                         'price' => $product->max_price,
                         'qty' => $product->product_qty,
                         'discount' => (string)$discount,
-                        'currency' => get_option('woocommerce_currency'),
+                        'currency' => get_woocommerce_currency(),
                         'image' => get_the_post_thumbnail_url($product->product_id),
                     ];
                 }
@@ -832,7 +832,7 @@ class Sender_WooCommerce
         $data = [
             "external_id" => $cart->id,
             "url" => $cartUrl,
-            "currency" => get_option('woocommerce_currency'),
+            "currency" => get_woocommerce_currency(),
             "order_total" => (string)$order->get_total(),
             "products" => [],
             'resource_key' => get_option('sender_resource_key'),
@@ -855,7 +855,7 @@ class Sender_WooCommerce
                 'sku' => $_product->get_sku(),
                 'name' => $_product->get_title(),
                 'price' => (string) $regularPrice,
-                'price_display' => (string) $_product->get_price() . get_option('woocommerce_currency'),
+                'price_display' => (string) $_product->get_price() . get_woocommerce_currency_symbol(),
                 'discount' => (string) $discount,
                 'qty' => $values->get_quantity(),
                 'image' => get_the_post_thumbnail_url($values->get_product_id()),

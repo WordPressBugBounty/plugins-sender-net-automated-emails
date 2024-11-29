@@ -347,7 +347,7 @@ class Sender_Carts
         $data = [
             "external_id" => $cart->id,
             "url" => $cartUrl,
-            "currency" => get_option('woocommerce_currency'),
+            "currency" => get_woocommerce_currency(),
             "order_total" => (string)$total,
             "products" => [],
             'resource_key' => $this->senderGetResourceKey(),
