@@ -335,6 +335,12 @@ class Sender_Carts
             return;
         }
 
+        $storeId = get_option('sender_store_register') ?: '';
+        if (empty($storeId)){
+            $this->fixEmptyStoreRegistered();
+            $storeId = get_option('sender_store_register')?: '';
+        }
+
         $baseUrl = wc_get_cart_url();
         $lastCharacter = substr($baseUrl, -1);
 
@@ -351,7 +357,7 @@ class Sender_Carts
             "order_total" => (string)$total,
             "products" => [],
             'resource_key' => $this->senderGetResourceKey(),
-            'store_id' => get_option('sender_store_register') ?: '',
+            'store_id' => $storeId,
             'email' => $user->email,
             'subscriber_id' => $user->sender_subscriber_id,
         ];
@@ -396,6 +402,11 @@ class Sender_Carts
         }
 
         return $data;
+    }
+
+    private function fixEmptyStoreRegistered()
+    {
+        $this->sender->senderHandleAddStore();
     }
 
     public function trackUser()
@@ -787,6 +798,12 @@ class Sender_Carts
                         'order_date' => $order_date,
                     ];
 
+                    $storeId = get_option('sender_store_register') ?: '';
+                    if (empty($storeId)){
+                        $this->fixEmptyStoreRegistered();
+                        $storeId = get_option('sender_store_register')?: '';
+                    }
+
                     $cartData = [
                         'external_id' => $cart->id,
                         'email' => strtolower($wcOrder->get_billing_email()),
@@ -798,7 +815,7 @@ class Sender_Carts
                         'billing' => $billing,
                         'shipping' => $shipping,
                         'order_details' => $orderDetails,
-                        'store_id' => get_option('sender_store_register') ?: '',
+                        'store_id' => $storeId,
                     ];
 
                     if ($list) {
@@ -914,6 +931,12 @@ class Sender_Carts
     //Block checkout subscribe to newsletter
     public function senderSubscribeNewsletterBlockEnqueueAssets()
     {
+        $storeId = get_option('sender_store_register') ?: '';
+        if (empty($storeId)){
+            $this->fixEmptyStoreRegistered();
+            $storeId = get_option('sender_store_register')?: '';
+        }
+
         wp_enqueue_script(
             'subscribe-newsletter-block',
             plugins_url('js/subscribe-newsletter.block.js', __FILE__),
@@ -930,7 +953,7 @@ class Sender_Carts
             'subscribe-newsletter-block',
             'senderNewsletter',
             [
-                'storeId' => get_option('sender_store_register'),
+                'storeId' => $storeId,
                 'senderCheckbox' => $this->senderSubscribeNewsletterText(),
                 'senderAjax' => admin_url('admin-ajax.php'),
                 'checkboxActive' => $checkBoxActive ?: false,
