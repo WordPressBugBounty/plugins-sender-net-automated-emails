@@ -103,16 +103,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (email === '') {
         } else {
-            setTimeout(function (){
-                handleCheckboxChange(checked, email, window.senderNewsletter.storeId);
-            }, 3000)
+            handleCheckboxChange(checked, email, window.senderNewsletter.storeId);
         }
     }
 
     function handleCheckboxChange(isChecked, email, storeId) {
         const senderData = {newsletter: isChecked, email: email, store_id: storeId};
 
-        console.log(senderData);
         sender('subscribeNewsletter', senderData);
     }
 
@@ -125,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 email: emailValue
             },
             success: function (response) {
-                console.log(response);
+                sender('trackVisitors', {email: emailValue});
             },
             error: function (textStatus, errorThrown) {
                 console.log("AJAX Error: " + textStatus + ", " + errorThrown);

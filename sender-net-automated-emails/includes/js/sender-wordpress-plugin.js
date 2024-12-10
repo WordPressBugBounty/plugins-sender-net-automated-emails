@@ -12,7 +12,6 @@ jQuery(document).ready(function () {
                 email: emailValue
             },
             success: function (response) {
-                console.log(response);
                 sender('trackVisitors', {email: emailValue});
             },
             error: function (textStatus, errorThrown) {
