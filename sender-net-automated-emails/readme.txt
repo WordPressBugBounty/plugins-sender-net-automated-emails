@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.8.4
+Stable tag: 2.8.5
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -334,4 +334,6 @@ purchased
 = 2.8.4 2024-12-10 =
 * Fix relation of subscriber - wp user
 * Fix on abandoned changing checkout email
+= 2.8.5 2024-12-10 =
+* Fix on page builder admin subscribe newsletter
 

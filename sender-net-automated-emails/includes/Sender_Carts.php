@@ -655,10 +655,10 @@ class Sender_Carts
         return $key;
     }
 
-    public function senderAddNewsletterCheck($order)
+    public function senderAddNewsletterCheck($order = null)
     {
         if (get_option('sender_subscribe_label') && !empty(get_option('sender_subscribe_to_newsletter_string'))) {
-            if (is_admin()) {
+            if (is_admin() && $order instanceof WC_Order) {
                 $emailMarketingConsent = $order->get_meta(Sender_Helper::EMAIL_MARKETING_META_KEY);
                 $currentValue = !empty($emailMarketingConsent) ? Sender_Helper::handleChannelStatus($emailMarketingConsent) : $order->get_meta('sender_newsletter');
             } elseif (is_account_page() && get_current_user_id()) {
