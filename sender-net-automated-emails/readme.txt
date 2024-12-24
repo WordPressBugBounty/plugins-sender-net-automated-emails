@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.8.5
+Stable tag: 2.8.6
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -127,6 +127,14 @@ Whatever industry or niche you are operating out of, regardless of the size of y
 = How can I reach Sender support? =
 
 Our customer support team is always ready to help you with your day-to-day tasks, so don’t hesitate to [contact us](https://www.sender.net/contact-us/). We don’t just direct you to a self-serving FAQ page when what you really need is a straightforward answer. Here you can find our [Help Center](https://help.sender.net/). Live chat working 24/7.
+
+= How can I add Sender forms into my Wordpress website? =
+
+This plugin supports 3 different ways to do that:
+
+1. Using a widget
+2. Using a form block
+3. Using this shortcode: [sender-form id="id"], which you can find by clicking on Overview on any form.
 
 == Installation ==
 
@@ -336,4 +344,6 @@ purchased
 * Fix on abandoned changing checkout email
 = 2.8.5 2024-12-10 =
 * Fix on page builder admin subscribe newsletter
+= 2.8.6 2024-12-23 =
+* How to set forms faq
 
