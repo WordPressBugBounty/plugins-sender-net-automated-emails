@@ -386,6 +386,14 @@ class Sender_Carts
                 $image_url = '';
             }
 
+            $maxLengthDesc = 300;
+
+            $description = is_string($_product->get_short_description()) && !empty($_product->get_short_description())
+                ? strip_shortcodes(strip_tags($_product->get_short_description()))
+                : (is_string($_product->get_description()) ? strip_shortcodes(strip_tags($_product->get_description())) : '');
+
+            $description = strlen($description) > $maxLengthDesc ? substr($description, 0, $maxLengthDesc) . '...' : $description;
+
             $prod = [
                 'sku' => $_product->get_sku(),
                 'name' => (string)$_product->get_title(),
@@ -395,7 +403,7 @@ class Sender_Carts
                 'qty' => $values['quantity'],
                 'image' => $image_url,
                 'product_id' => $_product->get_id(),
-                'description' => strip_tags((string)$_product->get_description()),
+                'description' => $description,
             ];
 
             $data['products'][] = $prod;

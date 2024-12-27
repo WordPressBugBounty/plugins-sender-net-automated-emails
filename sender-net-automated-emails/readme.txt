@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.8.6
+Stable tag: 2.8.7
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -346,4 +346,7 @@ purchased
 * Fix on page builder admin subscribe newsletter
 = 2.8.6 2024-12-23 =
 * How to set forms faq
+= 2.8.7 2024-12-27 =
+* Shorten description for carts
+* Fix display description script
 

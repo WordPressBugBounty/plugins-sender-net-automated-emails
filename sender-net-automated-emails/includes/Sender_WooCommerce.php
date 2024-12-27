@@ -355,7 +355,11 @@ class Sender_WooCommerce
         }
 
         $pName = str_replace("\"", '\\"', $product->get_name());
-        $pDescription = htmlspecialchars($product->get_description(), ENT_QUOTES, 'UTF-8');
+
+        $pDescription = is_string($product->get_short_description()) && !empty($product->get_short_description())
+            ? strip_shortcodes(strip_tags($product->get_short_description()))
+            : (is_string($product->get_description()) ? strip_shortcodes(strip_tags($product->get_description())) : '');
+
         $pCurrency = get_woocommerce_currency();
         $pQty = $product->get_stock_quantity() ? $product->get_stock_quantity() : 1;
         $pRating = $product->get_average_rating();
@@ -667,7 +671,8 @@ class Sender_WooCommerce
             $productExportData = [];
             $products = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'posts 
                       INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
-                      WHERE post_type = "product" LIMIT ' . $chunkSize . '
+                      WHERE post_type = "product"
+                      ORDER BY ' . $this->tablePrefix . 'posts.ID ASC LIMIT ' . $chunkSize . '
              OFFSET ' . $productsExported);
 
             foreach ($products as $product) {
@@ -678,7 +683,7 @@ class Sender_WooCommerce
 
                 $productExportData[] = [
                     'title' => $product->post_title,
-                    'description' => $product->post_content,
+                    'description' => is_string($product->post_content) ? strip_shortcodes(strip_tags($product->post_content)) : '',
                     'sku' => $product->sku,
                     'quantity' => $product->stock_quantity,
                     'remote_productId' => $product->product_id,
