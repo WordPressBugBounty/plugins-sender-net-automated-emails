@@ -546,7 +546,7 @@ class Sender_Carts
         }
 
         if (!empty($items)) {
-            if (!$this->senderUserId || !$senderUser) {
+            if (!$this->senderUserId && !$senderUser) {
                 $senderUser = $this->senderGetVisitor();
                 if (!$senderUser) {
                     return;

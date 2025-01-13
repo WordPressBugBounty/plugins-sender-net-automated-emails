@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.8.8
+Stable tag: 2.8.9
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -351,4 +351,7 @@ purchased
 * Fix display description script
 = 2.8.8 2024-12-27 =
 * Reduce product export chunk size
+= 2.8.9 2024-12-27 =
+* Fix on recurring carts
+
 
