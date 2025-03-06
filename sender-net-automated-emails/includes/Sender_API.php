@@ -197,6 +197,7 @@ class Sender_API
         $responseCode = wp_remote_retrieve_response_code($response);
         if (is_wp_error($response) || $responseCode != 200) {
             if ($responseCode == 429) {
+                set_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE,true, 60);
                 return json_decode(json_encode(['xRate' => true]));
             }
 
@@ -271,7 +272,13 @@ class Sender_API
 
     public function senderTrackCart(array $cartParams)
     {
-        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartParams)]);
+        $jsonBody = json_encode($cartParams);
+
+        if ($jsonBody === false) {
+            return false;
+        }
+
+        $params = array_merge($this->senderBaseRequestArguments(), ['body' => $jsonBody]);
 
         $response = wp_remote_post($this->senderStatsBaseUrl . 'carts', $params);
 

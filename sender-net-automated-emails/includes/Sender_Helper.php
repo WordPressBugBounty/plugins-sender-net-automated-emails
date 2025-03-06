@@ -40,6 +40,7 @@ class Sender_Helper
     const TRANSIENT_RECOVER_CART = 'sender_recovered_cart';
     const TRANSIENT_SYNC_FINISHED = 'sender_sync_finished';
     const TRANSIENT_PREPARE_CONVERT = 'sender_prepare_convert';
+    const TRANSIENT_SENDER_X_RATE = 'sender_api_rate_limited';
 
     const SENDER_JS_FILE_NAME = 'sender-wordpress-plugin';
 

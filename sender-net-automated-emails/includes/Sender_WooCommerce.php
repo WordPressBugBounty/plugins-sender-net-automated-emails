@@ -124,7 +124,6 @@ class Sender_WooCommerce
         <?php
     }
 
-
     public function senderUpdateCustomerData($userId)
     {
         $changedFields = [];
@@ -529,6 +528,15 @@ class Sender_WooCommerce
         }
     }
 
+    private function checkRateLimitation()
+    {
+        while (get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) {
+            sleep(5);
+        }
+
+        return true;
+    }
+
     public function sendWoocommerceCustomersToSender($customers, $list = null)
     {
         $customersExportData = [];
@@ -551,6 +559,7 @@ class Sender_WooCommerce
                 unset($customer['newsletter']);
             }
 
+            $this->checkRateLimitation();
             $customFields = $this->senderGetCustomerData($customer['email']);
             if (!empty($customFields)) {
                 $customer['fields'] = $customFields;
@@ -558,6 +567,7 @@ class Sender_WooCommerce
             $customersExportData[] = $customer;
         }
 
+        $this->checkRateLimitation();
         $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
     }
 
@@ -644,6 +654,7 @@ class Sender_WooCommerce
                 $data[Sender_Helper::EMAIL_MARKETING_META_KEY] = unserialize($customer[Sender_Helper::EMAIL_MARKETING_META_KEY][0]);
             }
 
+            $this->checkRateLimitation();
             $customFields = $this->senderGetCustomerData($email);
             if (!empty($customFields)) {
                 $data['fields'] = $customFields;
@@ -652,6 +663,7 @@ class Sender_WooCommerce
             $customersExportData[] = $data;
         }
 
+        $this->checkRateLimitation();
         $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
     }
 
@@ -698,6 +710,7 @@ class Sender_WooCommerce
 
             $productsExported += $chunkSize;
 
+            $this->checkRateLimitation();
             $this->sender->senderApi->senderExportData(['products' => $productExportData]);
         }
         return true;
@@ -771,6 +784,8 @@ class Sender_WooCommerce
                 $orderData['price'] = $orderPrice;
                 $ordersExportData[] = $orderData;
             }
+
+            $this->checkRateLimitation();
             $this->sender->senderApi->senderExportData(['orders' => $ordersExportData]);
             $ordersExported += $chunkSize;
         }
@@ -857,10 +872,9 @@ class Sender_WooCommerce
             $discount = round(100 - ($salePrice / $regularPrice * 100));
 
             $prod = [
-                'sku' => $_product->get_sku(),
-                'name' => $_product->get_title(),
+                'sku' => (string) $_product->get_sku(),
+                'name' => (string) $_product->get_title(),
                 'price' => (string) $regularPrice,
-                'price_display' => (string) $_product->get_price() . get_woocommerce_currency_symbol(),
                 'discount' => (string) $discount,
                 'qty' => $values->get_quantity(),
                 'image' => get_the_post_thumbnail_url($values->get_product_id()),

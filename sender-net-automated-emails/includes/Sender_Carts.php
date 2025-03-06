@@ -332,7 +332,7 @@ class Sender_Carts
         $user = (new Sender_User())->find($cart->user_id);
 
         if (!$user){
-            return;
+            return false;
         }
 
         $storeId = get_option('sender_store_register') ?: '';
@@ -365,8 +365,8 @@ class Sender_Carts
         foreach ($items as $item => $values) {
 
             $_product = wc_get_product($values['data']->get_id());
-            $regularPrice = (int)get_post_meta($values['product_id'], '_regular_price', true);
-            $salePrice = (int)get_post_meta($values['product_id'], '_sale_price', true);
+            $regularPrice = (float) $_product->get_regular_price();
+            $salePrice = (float) $_product->get_sale_price();
 
             if ($regularPrice <= 0) {
                 $regularPrice = 1;
@@ -382,7 +382,7 @@ class Sender_Carts
                 }
             }
 
-            if (!$image_url) {
+            if (!is_string($image_url) || !$image_url) {
                 $image_url = '';
             }
 
@@ -393,12 +393,12 @@ class Sender_Carts
                 : (is_string($_product->get_description()) ? strip_shortcodes(strip_tags($_product->get_description())) : '');
 
             $description = strlen($description) > $maxLengthDesc ? substr($description, 0, $maxLengthDesc) . '...' : $description;
+            $description = mb_convert_encoding($description, 'UTF-8', 'UTF-8');
 
             $prod = [
-                'sku' => $_product->get_sku(),
+                'sku' => (string) $_product->get_sku(),
                 'name' => (string)$_product->get_title(),
                 'price' => (string)$regularPrice,
-                'price_display' => (string)$_product->get_price() . get_woocommerce_currency_symbol(),
                 'discount' => (string)$discount,
                 'qty' => $values['quantity'],
                 'image' => $image_url,
@@ -563,13 +563,8 @@ class Sender_Carts
                 return;
             }
 
-            //Guest checkout
-            if ($this->senderUserId){
-                $senderUser = (new Sender_User())->find($this->senderUserId);
-                if ($senderUser) {
-                    $cartData['email'] = $senderUser->email;
-                    $this->sender->senderApi->senderTrackCart($cartData);
-                }
+            if ($this->senderUserId) {
+                $this->sender->senderApi->senderTrackCart($cartData);
                 return;
             }
 
