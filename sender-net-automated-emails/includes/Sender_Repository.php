@@ -61,8 +61,7 @@ class Sender_Repository
 
         $map = [
             'wp_user_id' => 'int(11)',
-            'sender_newsletter' => 'TINYINT(1)',
-            'sender_subscriber_id' => 'varchar(50)'
+            'sender_newsletter' => 'TINYINT(1)'
         ];
 
         foreach ($map as $column => $type) {
@@ -76,6 +75,11 @@ class Sender_Repository
         $visitorColumn = $wpdb->get_results("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '$sender_users' AND column_name = 'visitor_id'");
         if (!empty($visitorColumn)) {
             $wpdb->query("ALTER TABLE $sender_users DROP COLUMN visitor_id");
+        }
+
+        $subscriberIdColumn = $wpdb->get_results("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '$sender_users' AND column_name = 'sender_subscriber_id'");
+        if (empty($subscriberIdColumn)) {
+            $wpdb->query("ALTER TABLE $sender_users ADD COLUMN sender_subscriber_id varchar(50)");
         }
     }
 }
