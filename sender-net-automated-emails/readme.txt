@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.7.1
 Requires PHP: 7.1
-Stable tag: 2.9.1
+Stable tag: 2.9.2
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -358,5 +358,7 @@ purchased
 * Handle incorrect request on guest COD payment
 = 2.9.1 2025-04-28 =
 * Fix on missing column
+= 2.9.2 2025-04-30 =
+* Provide trackCart data response on guest trigger email checkout
 
 

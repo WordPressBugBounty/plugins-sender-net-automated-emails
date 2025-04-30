@@ -564,17 +564,15 @@ class Sender_Carts
             }
 
             if ($this->senderUserId) {
-                $this->sender->senderApi->senderTrackCart($cartData);
-                return;
+                return $this->sender->senderApi->senderTrackCart($cartData);
             }
 
             if (wp_doing_ajax()) {
                 if (get_option('woocommerce_cart_redirect_after_add') === 'yes') {
-                    $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $cartData);
-                    return;
+                    return $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $cartData);
                 }
 
-                $this->sender->senderApi->senderTrackCart($cartData);
+                return $this->sender->senderApi->senderTrackCart($cartData);
             } else {
                 $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $cartData);
             }
@@ -780,9 +778,12 @@ class Sender_Carts
         }
 
         $this->senderUserId = $senderUser->id;
-        $this->senderCartUpdated();
+        $cartUpdateResponse = $this->senderCartUpdated();
 
-        return wp_send_json_success($response);
+        return wp_send_json_success([
+            'cart_response'       => $cartUpdateResponse,
+            'subscriber_response' => $response,
+        ]);
     }
 
     //Use to convert carts which got confirmed payment
