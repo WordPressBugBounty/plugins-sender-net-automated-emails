@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
-Tested up to: 6.7.1
+Tested up to: 6.8.1
 Requires PHP: 7.1
-Stable tag: 2.9.2
+Stable tag: 2.9.3
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -360,5 +360,7 @@ purchased
 * Fix on missing column
 = 2.9.2 2025-04-30 =
 * Provide trackCart data response on guest trigger email checkout
+= 2.9.3 2025-05-14 =
+* Allow updating all times
 
 

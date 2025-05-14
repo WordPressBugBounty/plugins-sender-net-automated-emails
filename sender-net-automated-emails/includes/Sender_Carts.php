@@ -519,13 +519,6 @@ class Sender_Carts
             $cart->cart_data = $cartData;
             $cart->update();
 
-            //Fetch model for comparing updated value after changes
-            $updatedCart = (new Sender_Cart())->find($cart->id);
-
-            if ($oldUpdatedValue === $updatedCart->updated){
-                return;
-            }
-
             $cartData = $this->senderPrepareCartData($cart);
 
             if (!$cartData) {
