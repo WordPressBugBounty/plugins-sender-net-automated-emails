@@ -588,11 +588,11 @@ class Sender_WooCommerce
             )
         );
 
-        $totalSpent = 0;
+        $totalSpent = 0.0;
         $ordersCount = count($orders);
         if ($ordersCount > 0) {
             foreach ($orders as $key => $orderId) {
-                $totalSpent += get_post_meta($orderId, '_order_total', true);
+                $totalSpent += (float) get_post_meta($orderId, '_order_total', true);
                 $isLastIteration = ($key === ($ordersCount - 1));
                 if ($isLastIteration) {
                     $last_order_name = '#' . $orderId;

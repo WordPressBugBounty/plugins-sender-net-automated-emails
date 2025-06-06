@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.8.1
 Requires PHP: 7.1
-Stable tag: 2.9.3
+Stable tag: 2.9.4
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -362,5 +362,7 @@ purchased
 * Provide trackCart data response on guest trigger email checkout
 = 2.9.3 2025-05-14 =
 * Allow updating all times
+= 2.9.4 2025-06-06 =
+* Handle php8+ validation
 
 
