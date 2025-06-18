@@ -79,6 +79,8 @@ class Sender_Templates_Loader
             do_action('admin_notices');
         }
 
+        $this->checkDb();
+
         require_once('settings.php');
     }
 
@@ -118,5 +120,31 @@ class Sender_Templates_Loader
         }
 
         return false;
+    }
+
+    private function checkDb()
+    {
+        if (get_transient('sender_db_verified')) {
+            return;
+        }
+
+        global $wpdb;
+
+        $table = $wpdb->prefix . 'sender_automated_emails_users';
+        $column = 'sender_subscriber_id';
+
+        if (!Sender_Helper::columnExists($table, $column)) {
+            require_once(__DIR__ . '/../includes/Sender_Repository.php');
+            $success = (new Sender_Repository())->addSenderSubscriberId();
+
+            if ($success) {
+                set_transient('sender_db_verified', true, DAY_IN_SECONDS);
+                wp_safe_redirect(admin_url('admin.php?page=sender-settings'));
+                return;
+            }
+            return;
+        }
+
+        set_transient('sender_db_verified', true, DAY_IN_SECONDS);
     }
 }

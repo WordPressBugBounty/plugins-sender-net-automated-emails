@@ -102,4 +102,17 @@ class Sender_Helper
         return is_plugin_active('woocommerce/woocommerce.php');
     }
 
+    public static function columnExists($table, $column)
+    {
+        global $wpdb;
+        return (bool) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
+                 WHERE table_name = %s AND column_name = %s",
+                $table,
+                $column
+            )
+        );
+    }
+
 }

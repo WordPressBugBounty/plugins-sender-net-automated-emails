@@ -77,9 +77,21 @@ class Sender_Repository
             $wpdb->query("ALTER TABLE $sender_users DROP COLUMN visitor_id");
         }
 
-        $subscriberIdColumn = $wpdb->get_results("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = '$sender_users' AND column_name = 'sender_subscriber_id'");
-        if (empty($subscriberIdColumn)) {
-            $wpdb->query("ALTER TABLE $sender_users ADD COLUMN sender_subscriber_id varchar(50)");
+        $this->addSenderSubscriberId();
+    }
+
+    public function addSenderSubscriberId()
+    {
+        global $wpdb;
+
+        $table = $wpdb->prefix . "sender_automated_emails_users";
+        $column = 'sender_subscriber_id';
+
+        if (!Sender_Helper::columnExists($table, $column)) {
+            $wpdb->query("ALTER TABLE $table ADD COLUMN $column VARCHAR(50)");
+            return Sender_Helper::columnExists($table, $column);
         }
+
+        return true;
     }
 }
