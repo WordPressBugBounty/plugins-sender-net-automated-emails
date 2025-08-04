@@ -10,6 +10,7 @@ class Sender_WooCommerce
 {
     private $sender;
     private $tablePrefix;
+    private $logFilePath;
 
     public function __construct($sender, $update = false)
     {
@@ -28,6 +29,8 @@ class Sender_WooCommerce
 
         //Get order counts data
         add_action('sender_get_customer_data', [$this, 'senderGetCustomerData'], 10, 2);
+
+        $this->logFilePath = plugin_dir_path(__FILE__) . '../export-log.txt';
 
         if (is_admin()) {
             if (get_option('sender_subscribe_label') && !empty(get_option('sender_subscribe_to_newsletter_string'))) {
@@ -58,24 +61,27 @@ class Sender_WooCommerce
 
     }
 
-    //Adding default delay of 60 seconds.Using delay 30 seconds when called from interface.
     public function scheduleSenderExportShopDataCronJob($delay = 5)
     {
         if (!wp_next_scheduled('sender_export_shop_data_cron')) {
+            set_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS, true, 300);
             wp_schedule_single_event(time() + (int)$delay, 'sender_export_shop_data_cron');
         }
     }
 
     public function senderExportShopDataCronJob()
     {
+        $this->logExportDebugInfo('Start', "Sender export data started");
+
         $this->getTablePrefix();
         $this->exportCustomers();
         $this->exportProducts();
         $this->exportOrders();
+
         update_option('sender_wocommerce_sync', true);
         update_option('sender_synced_data_date', current_time('Y-m-d H:i:s'));
 
-        // Set a transient to indicate that the sync has finished
+        delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
         set_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED, true, 30);
 
         return true;
@@ -465,16 +471,20 @@ class Sender_WooCommerce
             AND o.post_status IN ('wc-completed', 'wc-on-hold', 'wc-processing')
             AND pm.meta_value IS NOT NULL");
 
+        $this->logExportDebugInfo('CustomersExport', "Total customers with completed orders: $totalCompleted");
+
         $clientCompleted = 0;
         if ($totalCompleted > $chunkSize) {
             $loopTimes = floor($totalCompleted / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
+                $this->logExportDebugInfo('CompletedOrders Chunk', "Offset: $clientCompleted | Chunk size: $chunkSize");
                 $woocommerceClientOrdersCompleted = $this->getWooClientsOrderCompleted($chunkSize, $clientCompleted);
                 $customerList = json_decode(json_encode($woocommerceClientOrdersCompleted), true);
                 $this->sendWoocommerceCustomersToSender($customerList, get_option('sender_customers_list'));
                 $clientCompleted += $chunkSize;
             }
         } else {
+            $this->logExportDebugInfo('CompletedOrders Chunk', "Offset: 0 | Chunk size: $chunkSize");
             $woocommerceClientOrdersCompleted = $this->getWooClientsOrderCompleted($chunkSize);
             $customerList = json_decode(json_encode($woocommerceClientOrdersCompleted), true);
             $this->sendWoocommerceCustomersToSender($customerList, get_option('sender_customers_list'));
@@ -490,16 +500,20 @@ class Sender_WooCommerce
             AND o.post_status NOT IN ('wc-completed', 'wc-on-hold', 'wc-processing')
             AND pm.meta_value IS NOT NULL");
 
+        $this->logExportDebugInfo('CustomersExport', "Total customers with incomplete orders: $totalNotCompleted");
+
         $clientNotCompleted = 0;
         if ($totalNotCompleted > $chunkSize) {
             $loopTimes = floor($totalNotCompleted / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
+                $this->logExportDebugInfo('NotCompletedOrders Chunk', "Offset: $clientNotCompleted | Chunk size: $chunkSize");
                 $woocommerceClientOrdersNotCompleted = $this->getWooClientsOrderNotCompleted($chunkSize, $clientNotCompleted);
                 $customerList = json_decode(json_encode($woocommerceClientOrdersNotCompleted), true);
                 $this->sendWoocommerceCustomersToSender($customerList);
                 $clientNotCompleted += $chunkSize;
             }
         } else {
+            $this->logExportDebugInfo('NotCompletedOrders Chunk', "Offset: 0 | Chunk size: $chunkSize");
             $woocommerceClientOrdersNotCompleted = $this->getWooClientsOrderNotCompleted($chunkSize);
             $customerList = json_decode(json_encode($woocommerceClientOrdersNotCompleted), true);
             $this->sendWoocommerceCustomersToSender($customerList);
@@ -508,10 +522,14 @@ class Sender_WooCommerce
         #Extract WP users with role customer. Registrations
         $usersQuery = new WP_User_Query(['fields' => 'id', 'role' => 'customer']);
         $usersCount = $usersQuery->get_total();
+
+        $this->logExportDebugInfo('CustomersExport', "Total registered WP customers: $usersCount");
+
         $usersExported = 0;
         if ($usersCount > $chunkSize) {
             $loopTimes = floor($usersCount / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
+                $this->logExportDebugInfo('WPUsers Chunk', "Offset: $usersExported | Chunk size: $chunkSize");
                 $usersQuery = new WP_User_Query([
                     'fields' => 'id',
                     'role' => 'customer',
@@ -523,9 +541,13 @@ class Sender_WooCommerce
                 $usersExported += $chunkSize;
             }
         } else {
+            $this->logExportDebugInfo('WPUsers Chunk', "Offset: 0 | Chunk size: $chunkSize");
             $customerList = json_decode(json_encode($usersQuery->get_results(), true));
             $this->sendUsersToSender($customerList);
         }
+
+        $this->logExportDebugInfo('CustomersExport', 'Customer export finished successfully');
+
     }
 
     private function checkRateLimitation()
@@ -674,6 +696,8 @@ class Sender_WooCommerce
                       INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
                       WHERE post_type = "product"');
 
+        $this->logExportDebugInfo('ExportProducts', "Total products: $productsCount");
+
         $chunkSize = 10;
         $productsExported = 0;
         $loopTimes = floor($productsCount / $chunkSize);
@@ -686,6 +710,8 @@ class Sender_WooCommerce
                       WHERE post_type = "product"
                       ORDER BY ' . $this->tablePrefix . 'posts.ID ASC LIMIT ' . $chunkSize . '
              OFFSET ' . $productsExported);
+
+            $this->logExportDebugInfo('Export Chunk', "Offset: $productsExported | Products Fetched: " . count($products));
 
             foreach ($products as $product) {
                 $image = '';
@@ -713,6 +739,8 @@ class Sender_WooCommerce
             $this->checkRateLimitation();
             $this->sender->senderApi->senderExportData(['products' => $productExportData]);
         }
+
+        $this->logExportDebugInfo('ExportProducts', "Export complete. Total exported: $productsExported");
         return true;
     }
 
@@ -723,6 +751,21 @@ class Sender_WooCommerce
             'SELECT COUNT(*) FROM ' . $this->tablePrefix . 'posts WHERE post_type = "shop_order" AND post_status != "trash" AND post_status != "auto-draft"'
         );
 
+        $this->logExportDebugInfo('ExportOrders', "Total orders: $totalOrders");
+
+        $statuses = [
+                'wc-pending', 'wc-processing', 'wc-on-hold',
+                'wc-completed', 'wc-cancelled', 'wc-refunded',
+                'wc-failed'
+        ];
+
+        foreach ($statuses as $status) {
+            $count = $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$this->tablePrefix}posts WHERE post_type = 'shop_order' AND post_status = %s", $status
+            ));
+            $this->logExportDebugInfo('Order Status Count', "$status = $count");
+        }
+
         $chunkSize = 50;
         $ordersExported = 0;
         $loopTimes = floor($totalOrders / $chunkSize);
@@ -731,6 +774,8 @@ class Sender_WooCommerce
             $ordersExportData = [];
             $chunkedOrders = $wpdb->get_results(
                 'SELECT * FROM ' . $this->tablePrefix . 'posts WHERE post_type = "shop_order" AND post_status != "trash" AND post_status != "auto-draft" LIMIT ' . $chunkSize . ' OFFSET ' . $ordersExported);
+
+            $this->logExportDebugInfo('Export Chunk', "Offset: $ordersExported | Orders Fetched: " . count($chunkedOrders));
 
             foreach ($chunkedOrders as $order) {
                 $remoteId = get_post_meta($order->ID, Sender_Helper::SENDER_CART_META, true);
@@ -892,5 +937,27 @@ class Sender_WooCommerce
         #Handle status of cart
         do_action('sender_update_order_status', $orderId);
 
+    }
+
+    private function logExportDebugInfo($step, $data)
+    {
+        try {
+            if (!is_writable(dirname($this->logFilePath))) {
+                error_log("[Sender Plugin] Log directory not writable.");
+                return;
+            }
+
+            if ($step === 'Start') {
+                file_put_contents($this->logFilePath, '');
+            }
+
+            $timestamp = date('Y-m-d H:i:s');
+            $log = "[$timestamp] [$step] $data" . PHP_EOL;
+            if (file_put_contents($this->logFilePath, $log, FILE_APPEND) === false) {
+                error_log("[Sender Plugin] Failed to write to export log.");
+            }
+        } catch (\Throwable $e) {
+            error_log("[Sender Plugin] Log exception: " . $e->getMessage());
+        }
     }
 }

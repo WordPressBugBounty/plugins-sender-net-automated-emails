@@ -39,6 +39,7 @@ class Sender_Helper
     const TRANSIENT_LOG_OUT = 'sender_user_logged_out';
     const TRANSIENT_RECOVER_CART = 'sender_recovered_cart';
     const TRANSIENT_SYNC_FINISHED = 'sender_sync_finished';
+    const TRANSIENT_SYNC_IN_PROGRESS = 'sender_sync_in_progress';
     const TRANSIENT_PREPARE_CONVERT = 'sender_prepare_convert';
     const TRANSIENT_SENDER_X_RATE = 'sender_api_rate_limited';
 

@@ -16,7 +16,9 @@
             const formsData = window.senderFormsBlockData.formsData || [];
 
             const onChange = function (newValue) {
-                senderForms.destroy(attributes.form);
+                if (typeof senderForms !== 'undefined') {
+                    senderForms.destroy(attributes.form);
+                }
                 setAttributes({form: newValue});
                 appendScript(newValue);
             };

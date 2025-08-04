@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
-Tested up to: 6.8.1
+Tested up to: 6.8.2
 Requires PHP: 7.1
-Stable tag: 2.9.5
+Stable tag: 2.9.7
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -366,5 +366,7 @@ purchased
 * Handle php8+ validation
 = 2.9.5 2025-06-18 =
 * Provide fix database notification and action inside sender sidebar menu
-
-
+= 2.9.6 2025-07-10 =
+* Sync download log
+= 2.9.7 2025-07-31 =
+* Form editor fix

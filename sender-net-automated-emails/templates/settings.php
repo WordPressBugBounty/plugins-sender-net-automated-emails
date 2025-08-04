@@ -4,17 +4,19 @@
     echo 'sender-single-column sender-d-flex';
 } ?>">
     <div class="sender-flex-column">
-        <?php
-        // Check if the sync has finished
-        $syncFinished = get_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
-        if ($syncFinished) {
-            echo '<div id="sender-data-sync-notice" class="notice notice-success is-dismissible"><p>';
-            _e('Synced data completed.', 'sender-net-automated-emails');
-            echo '</p></div>';
-            echo '<br>';
-            delete_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
-        }
-        ?>
+        <?php if (get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) : ?>
+            <div id="sender-sync-notice" class="notice notice-info is-dismissible">
+                <p>
+                    <strong>
+                        <?php _e('Synchronizing your shop data with Sender.', 'sender-net-automated-emails'); ?>
+                        <a href="https://app.sender.net/settings/connected-stores" target="_blank">
+                            <?php _e('See your store information', 'sender-net-automated-emails'); ?>
+                        </a>
+                    </strong>
+                </p>
+            </div>
+        <?php endif; ?>
+
         <?php if (!$apiKey || get_option('sender_account_disconnected')) { ?>
             <form method="post" action=''
                   class="sender-box sender-br-5 sender-api-key sender-d-flex sender-flex-dir-column"
@@ -247,8 +249,8 @@
                           id="sender-export-data">
                         <div class="sender-mb-20">
                             <?php
-                            // Check if there is a running or scheduled cron job
-                            if ((isset($isCronJobRunning) && $isCronJobRunning) && (isset($syncFinished) && !$syncFinished)) {
+                            $isSyncRunning = get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
+                            if ($isSyncRunning) {
                                 $disableSubmit = 'disabled';
                                 $noticeMessage = esc_html__('A job is running to sync data with Sender application.', 'sender-net-automated-emails');
                             } else {
@@ -270,6 +272,24 @@
                                                 style="display: block"><?php echo get_option('sender_synced_data_date'); ?></strong></span>
                                 </div>
                             </div>
+
+                            <!-- SYNC log file -->
+                            <?php
+                            $logFilePath = plugin_dir_path(__FILE__) . '../debug-log.txt';
+                            $logDownloadUrl = plugins_url('export-log.txt', dirname(__FILE__));
+
+                            if (file_exists($logFilePath) && !get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) {
+                                ?>
+                                <div class="sender-option sender-mb-20">
+                                    <a href="<?php echo esc_url($logDownloadUrl); ?>"
+                                       class="sender-secondary-button sender-medium sender-br-5"
+                                       download>
+                                        <?php _e('Download Sync Log', 'sender-net-automated-emails'); ?>
+                                    </a>
+                                </div>
+                                <?php
+                            }
+                            ?>
                         </div>
                         <?php wp_nonce_field('sender_admin_referer'); ?>
                     </form>
@@ -447,4 +467,67 @@
             preCheckCheckbox.checked = false;
         }
     });
+
+    <?php if (get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) : ?>
+    var ajaxurl = "<?php echo admin_url('admin-ajax.php'); ?>";
+
+    (function pollSenderSyncStatus() {
+        const intervalId = setInterval(function () {
+            jQuery.ajax({
+                url: ajaxurl,
+                method: 'POST',
+                data: {
+                    action: 'checkSyncStatus',
+                },
+                success: function (response) {
+                    if (response.success) {
+                        if (!response.data.is_running && response.data.is_finished) {
+                            const $existingNotice = jQuery('#sender-sync-notice');
+
+                            const successHTML = `
+                                <div id="sender-sync-notice" class="notice notice-success is-dismissible">
+                                    <p><strong>Sync completed successfully.</strong></p>
+                                    <button type="button" class="notice-dismiss">
+                                        <span class="screen-reader-text">Dismiss this notice.</span>
+                                    </button>
+                                </div>
+                            `;
+
+                            if ($existingNotice.length) {
+                                $existingNotice
+                                    .removeClass('notice-info')
+                                    .addClass('notice-success')
+                                    .html('<p><strong>Sync completed successfully.</strong></p><button type="button" class="notice-dismiss"><span class="screen-reader-text">Dismiss this notice.</span></button>');
+                            } else {
+                                jQuery('#sender-export-data').prepend(successHTML);
+                            }
+
+                            jQuery(document).on('click', '.notice.is-dismissible .notice-dismiss', function () {
+                                jQuery(this).closest('.notice').fadeOut();
+                            });
+
+                            jQuery('#sender-submit-sync').prop('disabled', false);
+
+                            if (!jQuery('#sender-download-log').length) {
+                                const logButtonHTML = `
+                                    <div id="sender-download-log" class="sender-option sender-mb-20">
+                                        <a href="<?php echo esc_url($logDownloadUrl); ?>"
+                                           class="sender-secondary-button sender-medium sender-br-5"
+                                           download>
+                                           <?php _e('Download Sync Log', 'sender-net-automated-emails'); ?>
+                                        </a>
+                                    </div>
+                                `;
+                                jQuery('#sender-export-data .sender-mb-20').last().append(logButtonHTML);
+                            }
+
+                            clearInterval(intervalId);
+                        }
+                    }
+                }
+            });
+        }, 10000);
+    })();
+    <?php endif; ?>
 </script>
+>

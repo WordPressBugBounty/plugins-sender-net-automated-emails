@@ -596,3 +596,19 @@ label.sender-checkbox-label {
     background-size: contain;
     padding:15px;
 }
+
+.sender-secondary-button {
+    background-color: #f3f4f6;
+    color: #111827;
+    border: 1px solid #d1d5db;
+    padding: 10px 16px;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.2s;
+}
+.sender-secondary-button:hover {
+    background-color: #e5e7eb;
+}
+#sender-sync-notice{
+    margin: 0px 0px 20px!important;
+}

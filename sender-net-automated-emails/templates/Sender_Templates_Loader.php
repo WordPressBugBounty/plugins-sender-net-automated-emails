@@ -12,6 +12,7 @@ class Sender_Templates_Loader
     {
         $this->sender = $sender;
 
+        add_action('wp_ajax_checkSyncStatus', [$this, 'checkSyncStatus']);
         add_action('admin_menu', [&$this, 'senderInitSidebar'], 2, 2);
     }
 
@@ -63,22 +64,6 @@ class Sender_Templates_Loader
             }
         }
 
-        $isCronJobRunning = $this->sender_is_cron_job_running();
-
-        if ($isCronJobRunning && false === get_transient('sender_sync_on_progress')){
-            set_transient('sender_sync_on_progress', true, 15);
-            add_action(
-                'admin_notices',
-                function() {
-                    echo '<div id="sender-data-sync-notice" class="notice notice-success is-dismissible"><p><strong>' .
-                        sprintf( esc_html__( 'Synchronizing your shop data with Sender. 
-                        See your store information %s ', 'sender-net-automated-emails' ),
-                            '<a href="https://app.sender.net/settings/connected-stores" target="_blank">here.</a>' ) . '</strong></p></div>';
-                }
-            );
-            do_action('admin_notices');
-        }
-
         $this->checkDb();
 
         require_once('settings.php');
@@ -93,33 +78,6 @@ class Sender_Templates_Loader
         }
 
         return $groupsDataSenderOption;
-    }
-
-    public function sender_is_cron_job_running()
-    {
-        $nextTimestamp = wp_next_scheduled('sender_export_shop_data_cron');
-
-        if ($nextTimestamp) {
-            // Calculate the remaining time until the next scheduled event
-            $remainingTime = $nextTimestamp - time();
-
-            // If the remaining time is greater than 0, there is a scheduled cron job
-            if ($remainingTime > 0) {
-                return true;
-            }
-        }
-
-        // Check if there are any running cron events and sender cron is running
-        $runningEvents = _get_cron_array();
-        if(!empty($runningEvents)) {
-            foreach ($runningEvents as $timestamp => $event) {
-                if (isset($event['sender_export_shop_data_cron'])) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     private function checkDb()
@@ -146,5 +104,15 @@ class Sender_Templates_Loader
         }
 
         set_transient('sender_db_verified', true, DAY_IN_SECONDS);
+    }
+
+    public function checkSyncStatus() {
+        $isRunning = get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
+        $isFinished = get_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
+
+        wp_send_json_success([
+            'is_running' => (bool)$isRunning,
+            'is_finished' => (bool)$isFinished,
+        ]);
     }
 }
