@@ -49,7 +49,24 @@ class Sender_Automated_Emails
             require_once("Sender_Repository.php");
         }
 
-        register_activation_hook($senderBaseFile, [new Sender_Repository(), 'senderCreateTables']);
+        register_activation_hook($senderBaseFile, function () {
+            (new Sender_Repository())->senderCreateTables();
+            update_option('sender_plugin_version', SENDER_PLUGIN_VERSION);
+        });
+
+        add_action('plugins_loaded', function () {
+            $installed_version = get_option('sender_plugin_version');
+            if ($installed_version !== SENDER_PLUGIN_VERSION) {
+                if (!class_exists('Sender_Repository')) {
+                    require_once plugin_dir_path(__FILE__) . 'includes/Sender_Repository.php';
+                }
+
+                $success = (new Sender_Repository())->addSenderSubscriberId();
+                if ($success) {
+                    update_option('sender_plugin_version', SENDER_PLUGIN_VERSION);
+                }
+            }
+        });
 
         $this->senderEnqueueStyles();
         $this->senderCreateSettingsTemplates();
@@ -68,7 +85,7 @@ class Sender_Automated_Emails
         }
 
         $this->senderAddActions()
-            ->senderSetupWooCommerce();
+                ->senderSetupWooCommerce();
 
         $this->senderAddWebhooks();
     }
@@ -270,8 +287,8 @@ class Sender_Automated_Emails
     {
         $key = $this->senderApi->senderGetResourceKey();
         $script_url = $isAdmin
-            ? 'https://cdn.sender.net/accounts_resources/universal.js?explicit=true'
-            : 'https://cdn.sender.net/accounts_resources/universal.js';
+                ? 'https://cdn.sender.net/accounts_resources/universal.js?explicit=true'
+                : 'https://cdn.sender.net/accounts_resources/universal.js';
 
         ob_start();
         ?>
@@ -376,11 +393,11 @@ class Sender_Automated_Emails
     public function sender_form_shortcode($atts)
     {
         $atts = shortcode_atts(
-            array(
-                'id' => ''
-            ),
-            $atts,
-            'sender-form'
+                array(
+                        'id' => ''
+                ),
+                $atts,
+                'sender-form'
         );
 
         $form_id = esc_attr($atts['id']);
@@ -408,7 +425,7 @@ class Sender_Automated_Emails
     {
 
         $additionalLinks = [
-            '<a href="' . admin_url('admin.php?page=sender-settings') . '">Settings</a>',
+                '<a href="' . admin_url('admin.php?page=sender-settings') . '">Settings</a>',
         ];
 
         return array_merge($links, $additionalLinks);
