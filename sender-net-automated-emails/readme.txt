@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.2
 Tested up to: 6.8.2
 Requires PHP: 7.1
-Stable tag: 2.9.8
+Stable tag: 2.9.9
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -372,3 +372,5 @@ purchased
 * Form editor fix
 = 2.9.8 2025-08-05 =
 * Fix on updated db
+= 2.9.9 2025-08-19 =
+* Refactor session cart && cart delete
