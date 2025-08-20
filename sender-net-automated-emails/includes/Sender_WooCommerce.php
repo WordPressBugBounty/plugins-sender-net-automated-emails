@@ -195,6 +195,8 @@ class Sender_WooCommerce
         $email = $postMeta['_billing_email'][0];
         $senderUser = (new Sender_User())->findBy('email', $email);
 
+        $billingCountry = isset($_POST['_billing_country']) ? $_POST['_billing_country'] : '';
+
         #Order update, created from interface
         if (isset($postMeta[Sender_Helper::SENDER_CART_META]) || $senderUser) {
             $subscriberData = [];
@@ -206,8 +208,11 @@ class Sender_WooCommerce
                 $subscriberData['lastname'] = $_POST['_billing_last_name'];
             }
 
-            if (isset($_POST['_billing_phone'])) {
-                $subscriberData['phone'] = $_POST['_billing_phone'];
+            if (!empty($_POST['_billing_phone'])) {
+                $normalized = $this->normalizePhoneE164($_POST['_billing_phone'], $billingCountry);
+                if ($normalized !== '') {
+                    $subscriberData['phone'] = $normalized;
+                }
             }
 
             $channelStatusData = $this->handleSenderNewsletterFromDashboard($orderId, $subscriberData, true);
@@ -237,7 +242,10 @@ class Sender_WooCommerce
             }
 
             if (isset($_POST['_billing_phone'])) {
-                $subscriberData['phone'] = $_POST['_billing_phone'];
+                $normalized = $this->normalizePhoneE164($_POST['_billing_phone'], $billingCountry);
+                if ($normalized !== '') {
+                    $subscriberData['phone'] = $normalized;
+                }
             }
 
             $channelStatusData = $this->handleSenderNewsletterFromDashboard($orderId, $subscriberData, false);
@@ -783,19 +791,68 @@ class Sender_WooCommerce
                     $remoteId = get_post_meta($order->ID, '_order_key', true);
                 }
 
+                $billingCountry   = get_post_meta($order->ID, '_billing_country', true);
+                $shippingCountry  = get_post_meta($order->ID, '_shipping_country', true);
+                $billingPhoneRaw  = get_post_meta($order->ID, '_billing_phone', true);
+                $shippingPhoneRaw = get_post_meta($order->ID, '_shipping_phone', true);
+
+                $billingPhoneNormalized  = $this->normalizePhoneE164($billingPhoneRaw,  $billingCountry);
+                $billingPhoneNormalized  = $billingPhoneNormalized !== '' ? $billingPhoneNormalized : null;
+
+                $shippingPhoneNormalized = $this->normalizePhoneE164($shippingPhoneRaw, $shippingCountry);
+                $shippingPhoneNormalized = $shippingPhoneNormalized !== '' ? $shippingPhoneNormalized : null;
+
                 $orderData = [
-                    'status' => $order->post_status,
-                    'updated_at' => $order->post_modified,
-                    'created_at' => $order->post_date,
-                    'remoteId' => $remoteId,
-                    'name' => $order->post_name,
-                    'currency' => get_woocommerce_currency(),
-                    'orderId' => $order->ID,
-                    'email' => get_post_meta($order->ID, '_billing_email', true),
-                    'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
-                    'lastname' => get_post_meta($order->ID, '_billing_last_name', true),
-                    'phone' => get_post_meta($order->ID, '_billing_phone', true),
+                        'status' => $order->post_status,
+                        'updated_at' => $order->post_modified,
+                        'created_at' => $order->post_date,
+                        'remoteId' => $remoteId,
+                        'name' => $order->post_name,
+                        'currency' => get_woocommerce_currency(),
+                        'orderId' => $order->ID,
+                        'email' => get_post_meta($order->ID, '_billing_email', true),
+                        'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
+                        'lastname' => get_post_meta($order->ID, '_billing_last_name', true),
                 ];
+
+                if ($billingPhoneNormalized !== null && $billingPhoneNormalized !== '') {
+                    $orderData['phone'] = $billingPhoneNormalized;
+                }
+
+                $billing = [
+                        'first_name' => get_post_meta($order->ID, '_billing_first_name', true),
+                        'last_name'  => get_post_meta($order->ID, '_billing_last_name', true),
+                        'company'    => get_post_meta($order->ID, '_billing_company', true),
+                        'address_1'  => get_post_meta($order->ID, '_billing_address_1', true),
+                        'address_2'  => get_post_meta($order->ID, '_billing_address_2', true),
+                        'city'       => get_post_meta($order->ID, '_billing_city', true),
+                        'state'      => get_post_meta($order->ID, '_billing_state', true),
+                        'postcode'   => get_post_meta($order->ID, '_billing_postcode', true),
+                        'country'    => $billingCountry,
+                        'email'      => get_post_meta($order->ID, '_billing_email', true),
+                        'phone'      => $billingPhoneNormalized,
+                ];
+
+                $orderData['billing'] = array_filter($billing, function ($v) {
+                    return $v !== '' && $v !== null;
+                });
+
+                $shipping = [
+                        'first_name' => get_post_meta($order->ID, '_shipping_first_name', true),
+                        'last_name'  => get_post_meta($order->ID, '_shipping_last_name', true),
+                        'company'    => get_post_meta($order->ID, '_shipping_company', true),
+                        'address_1'  => get_post_meta($order->ID, '_shipping_address_1', true),
+                        'address_2'  => get_post_meta($order->ID, '_shipping_address_2', true),
+                        'city'       => get_post_meta($order->ID, '_shipping_city', true),
+                        'state'      => get_post_meta($order->ID, '_shipping_state', true),
+                        'postcode'   => get_post_meta($order->ID, '_shipping_postcode', true),
+                        'country'    => $shippingCountry,
+                        'phone'      => $shippingPhoneNormalized,
+                ];
+
+                $orderData['shipping'] = array_filter($shipping, function ($v) {
+                    return $v !== '' && $v !== null;
+                });
 
                 $productsData = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'wc_order_product_lookup
             INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup on ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'wc_order_product_lookup.product_id
@@ -815,14 +872,14 @@ class Sender_WooCommerce
                     $discount = round(100 - ($salePrice / $regularPrice * 100));
                     $orderPrice += $product->max_price * $product->product_qty;
                     $orderData['products'][$key] = [
-                        'product_id' => $product->ID,
-                        'sku' => $product->sku,
-                        'name' => $product->post_title,
-                        'price' => $product->max_price,
-                        'qty' => $product->product_qty,
-                        'discount' => (string)$discount,
-                        'currency' => get_woocommerce_currency(),
-                        'image' => get_the_post_thumbnail_url($product->product_id),
+                            'product_id' => $product->ID,
+                            'sku' => $product->sku,
+                            'name' => $product->post_title,
+                            'price' => $product->max_price,
+                            'qty' => $product->product_qty,
+                            'discount' => (string)$discount,
+                            'currency' => get_woocommerce_currency(),
+                            'image' => get_the_post_thumbnail_url($product->product_id),
                     ];
                 }
 
@@ -958,6 +1015,75 @@ class Sender_WooCommerce
             }
         } catch (\Throwable $e) {
             error_log("[Sender Plugin] Log exception: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Normalize a phone number to an E.164-like string using WooCommerce's country calling code.
+     * Examples:
+     *   raw: "4802130814", country: "US" => "+14802130814"
+     *   raw: "+1 (480) 213-0814"         => "+14802130814"
+     *   raw: "067696602", country: "LT"  => "+37067696602"
+     *   raw: "01632102000", country: "BD"=> "+8801632102000"
+     */
+    private function normalizePhoneE164($rawPhone, $countryIso2)
+    {
+        try {
+            $rawPhone = trim((string) $rawPhone);
+            if ($rawPhone === '') {
+                return '';
+            }
+
+            $iso = strtoupper((string) $countryIso2);
+
+            if (substr($rawPhone, 0, 1) === '+') {
+                return '+' . preg_replace('/\D+/', '', substr($rawPhone, 1));
+            }
+
+            if (strpos($rawPhone, '00') === 0) {
+                $rest = preg_replace('/\D+/', '', substr($rawPhone, 2));
+                return $rest !== '' ? '+' . $rest : '';
+            }
+            if (strpos($rawPhone, '011') === 0) {
+                $rest = preg_replace('/\D+/', '', substr($rawPhone, 3));
+                return $rest !== '' ? '+' . $rest : '';
+            }
+
+            $digits = preg_replace('/\D+/', '', $rawPhone);
+            if ($digits === '') {
+                return '';
+            }
+
+            $cc = '';
+            if ($iso !== '') {
+                try {
+                    $countries = new \WC_Countries();
+                    $ccVal = $countries->get_country_calling_code($iso);
+                    if (is_array($ccVal)) {
+                        $ccVal = reset($ccVal);
+                    }
+                    $ccDigits = preg_replace('/\D+/', '', (string) $ccVal);
+                    if ($ccDigits !== '') {
+                        $cc = '+' . $ccDigits;
+                    }
+                } catch (\Throwable $e) {
+                    $cc = '';
+                }
+            }
+
+            if ($cc !== '') {
+                $ccDigits = substr($cc, 1);
+                if ($ccDigits !== '' && strpos($digits, $ccDigits) === 0) {
+                    return '+' . $digits;
+                }
+
+                $national = ltrim($digits, '0');
+                return $cc . $national;
+            }
+
+            return '+' . ltrim($digits, '0');
+        } catch (\Throwable $e) {
+            return '';
         }
     }
 }
