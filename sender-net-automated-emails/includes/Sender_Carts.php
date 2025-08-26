@@ -62,6 +62,9 @@ class Sender_Carts
         //Recovered cart visit
         add_action('wp_head', [$this, 'outputSenderTrackVisitorsScript']);
 
+        //Convert cart script
+        add_action('sender_add_convert_cart_script', [$this, 'addConvertCartScript'], 10, 1);
+
         if (is_admin()) {
             add_action('woocommerce_order_status_changed', [$this, 'senderUpdateOrderStatus']);
             add_action('sender_update_order_status',[$this, 'senderUpdateOrderStatus']);
@@ -159,7 +162,8 @@ class Sender_Carts
             }else{
                 $this->senderCartUpdated();
             }
-        }else{
+        }
+        else{
             if ($order) {
                 if (!$this->handleGuestConvertCart($order)){
                     return false;
@@ -181,7 +185,7 @@ class Sender_Carts
             'created DESC'
         );
 
-        if(!$cart){
+        if(!$cart || $cart->cart_status === (int) Sender_Helper::CONVERTED_CART){
             return false;
         }
 
@@ -212,12 +216,16 @@ class Sender_Carts
         }
 
         set_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT, '1', 5);
+
+        return true;
     }
 
     public function senderConvertCart($orderId)
     {
         if (!get_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT)){
-            $this->prepareConvertCart(wc_get_order($orderId));
+            if(!$this->prepareConvertCart(wc_get_order($orderId))){
+                return false;
+            }
         }
 
         if (is_user_logged_in()) {
@@ -271,7 +279,8 @@ class Sender_Carts
             'city' => $wcOrder->get_billing_city(),
             'state' => $wcOrder->get_billing_state(),
             'zip' => $wcOrder->get_billing_postcode(),
-            'country' => $wcOrder->get_billing_country()
+            'country' => $wcOrder->get_billing_country(),
+            'customer_ip' => $wcOrder->get_customer_ip_address(),
         ];
 
         $shipping = [
@@ -318,13 +327,14 @@ class Sender_Carts
         }
 
         update_post_meta($orderId, Sender_Helper::SENDER_CART_META, $cart->id);
-        add_action('sender_add_convert_cart_script', [&$this, 'addConvertCartScript'], 10, 1);
         do_action('sender_add_convert_cart_script', $cartData);
         do_action('sender_get_customer_data', $email, true);
 
         if (is_user_logged_in()) {
             set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 0);
         }
+
+        delete_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT);
     }
 
     public function senderPrepareCartData($cart)
@@ -362,6 +372,7 @@ class Sender_Carts
             'store_id' => $storeId,
             'email' => $user->email,
             'subscriber_id' => $user->sender_subscriber_id,
+            'ip_address' => Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address()),
         ];
 
         foreach ($items as $item => $values) {
@@ -837,7 +848,8 @@ class Sender_Carts
                         'city' => $wcOrder->get_billing_city(),
                         'state' => $wcOrder->get_billing_state(),
                         'zip' => $wcOrder->get_billing_postcode(),
-                        'country' => $wcOrder->get_billing_country()
+                        'country' => $wcOrder->get_billing_country(),
+                        'customer_ip' => $wcOrder->get_customer_ip_address(),
                     ];
 
                     $shipping = [

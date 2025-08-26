@@ -1,10 +1,10 @@
 === Sender - Newsletter, SMS and Email Marketing Automation for WooCommerce ===
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
-Requires at least: 4.2
+Requires at least: 4.7.0
 Tested up to: 6.8.2
 Requires PHP: 7.1
-Stable tag: 2.9.10
+Stable tag: 2.9.11
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -376,3 +376,5 @@ purchased
 * Refactor session cart && cart delete
 = 2.9.10 2025-08-20 =
 * Shipping and billing and handle phone sanitization for sync orders
+= 2.9.11 2025-08-26 =
+* Firstname, lastname, location updates for sync orders

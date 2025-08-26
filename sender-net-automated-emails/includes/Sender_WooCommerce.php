@@ -29,6 +29,7 @@ class Sender_WooCommerce
 
         //Get order counts data
         add_action('sender_get_customer_data', [$this, 'senderGetCustomerData'], 10, 2);
+        add_action('sender_update_customer_background', [$this, 'senderUpdateCustomerBackground'], 10, 2);
 
         $this->logFilePath = plugin_dir_path(__FILE__) . '../export-log.txt';
 
@@ -637,8 +638,16 @@ class Sender_WooCommerce
             ];
         }
 
-        if($update && isset($ordersData)){
-            $this->sender->senderApi->updateCustomer(['fields' => $ordersData], $email);
+        if ($update && isset($ordersData)) {
+            if (function_exists('as_enqueue_async_action')) {
+                as_enqueue_async_action(
+                        'sender_update_customer_background',
+                        [$email, $ordersData]
+                );
+            } else {
+                $this->sender->senderApi->updateCustomer(['fields' => $ordersData], $email);
+            }
+
             return true;
         }
 
@@ -802,6 +811,10 @@ class Sender_WooCommerce
                 $shippingPhoneNormalized = $this->normalizePhoneE164($shippingPhoneRaw, $shippingCountry);
                 $shippingPhoneNormalized = $shippingPhoneNormalized !== '' ? $shippingPhoneNormalized : null;
 
+                $wcOrder = wc_get_order($order->ID);
+                $customerIp = $wcOrder ? $wcOrder->get_customer_ip_address() : null;
+                $customerId = $wcOrder ? (int) ($wcOrder->get_customer_id() ?: $wcOrder->get_user_id()) : 0;
+
                 $orderData = [
                         'status' => $order->post_status,
                         'updated_at' => $order->post_modified,
@@ -814,6 +827,11 @@ class Sender_WooCommerce
                         'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
                         'lastname' => get_post_meta($order->ID, '_billing_last_name', true),
                 ];
+
+                // only add if valid WP user is linked
+                if ($customerId > 0) {
+                    $orderData['customer_id'] = $customerId;
+                }
 
                 if ($billingPhoneNormalized !== null && $billingPhoneNormalized !== '') {
                     $orderData['phone'] = $billingPhoneNormalized;
@@ -853,6 +871,12 @@ class Sender_WooCommerce
                 $orderData['shipping'] = array_filter($shipping, function ($v) {
                     return $v !== '' && $v !== null;
                 });
+
+                if (!empty($customerIp)) {
+                    $orderData['registration_ip'] = $customerIp;
+                    $orderData['billing']['customer_ip']  = $customerIp;
+                    $orderData['shipping']['customer_ip'] = $customerIp;
+                }
 
                 $productsData = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'wc_order_product_lookup
             INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup on ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'wc_order_product_lookup.product_id
@@ -1086,4 +1110,14 @@ class Sender_WooCommerce
             return '';
         }
     }
+
+    public function senderUpdateCustomerBackground($email, $fields)
+    {
+        if (empty($email) || empty($fields)) {
+            return;
+        }
+
+        $this->sender->senderApi->updateCustomer(['fields' => $fields], $email);
+    }
+
 }

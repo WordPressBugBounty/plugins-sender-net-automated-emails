@@ -116,4 +116,16 @@ class Sender_Helper
         );
     }
 
+    public static function normalizeIpToIpv4( string $ip ): string
+    {
+        if (strpos($ip, '::ffff:') === 0) {
+            $maybeIpv4 = substr($ip, 7);
+            if (filter_var($maybeIpv4, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                return $maybeIpv4;
+            }
+        }
+
+        return $ip;
+    }
+
 }
