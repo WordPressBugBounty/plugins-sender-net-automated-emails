@@ -731,19 +731,17 @@ class Sender_WooCommerce
             $this->logExportDebugInfo('Export Chunk', "Offset: $productsExported | Products Fetched: " . count($products));
 
             foreach ($products as $product) {
-                $image = '';
-                if (get_post_thumbnail_id($product->ID)) {
-                    $image = wp_get_attachment_image_src(get_post_thumbnail_id($product->ID))[0];
-                }
+                $wcProduct=wc_get_product($product->ID);
+                if(!$wcProduct){continue;}
 
                 $productExportData[] = [
                     'title' => $product->post_title,
-                    'description' => is_string($product->post_content) ? strip_shortcodes(strip_tags($product->post_content)) : '',
-                    'sku' => $product->sku,
-                    'quantity' => $product->stock_quantity,
-                    'remote_productId' => $product->product_id,
-                    'image' => [$image],
-                    'price' => number_format($product->max_price, 2),
+                    'description' => Sender_Helper::getProductShortText($wcProduct),
+                    'sku' => $wcProduct->get_sku() ?: $product->sku,
+                    'quantity' => $wcProduct->get_stock_quantity() ?? $product->stock_quantity,
+                    'remote_productId' => $product->ID,
+                    'image' => [Sender_Helper::getProductImageUrl($wcProduct)],
+                    'price' => number_format((float)$product->max_price,2),
                     'status' => $product->post_status,
                     'created_at' => $product->post_date,
                     'updated_at' => $product->post_modified,

@@ -387,26 +387,8 @@ class Sender_Carts
 
             $discount = round(100 - ($salePrice / $regularPrice * 100));
 
-            $image_url = get_the_post_thumbnail_url($_product->get_id());
-            if (!$image_url) {
-                $gallery_image_ids = $_product->get_gallery_image_ids();
-                if (!empty($gallery_image_ids)) {
-                    $image_url = wp_get_attachment_url($gallery_image_ids[0]);
-                }
-            }
-
-            if (!is_string($image_url) || !$image_url) {
-                $image_url = '';
-            }
-
-            $maxLengthDesc = 300;
-
-            $description = is_string($_product->get_short_description()) && !empty($_product->get_short_description())
-                ? strip_shortcodes(strip_tags($_product->get_short_description()))
-                : (is_string($_product->get_description()) ? strip_shortcodes(strip_tags($_product->get_description())) : '');
-
-            $description = strlen($description) > $maxLengthDesc ? substr($description, 0, $maxLengthDesc) . '...' : $description;
-            $description = mb_convert_encoding($description, 'UTF-8', 'UTF-8');
+            $image_url = Sender_Helper::getProductImageUrl($_product);
+            $description = Sender_Helper::getProductShortText($_product);
 
             $prod = [
                 'sku' => (string) $_product->get_sku(),
