@@ -128,7 +128,7 @@ class Sender_Helper
         return $ip;
     }
 
-    public static function getProductImageUrl(WC_Product $product, $size='woocommerce_single'): string {
+    public static function getProductImageUrl(WC_Product $product, $size='woocommerce_thumbnail'): string {
         $img_id = $product->get_image_id();
 
         if(empty($img_id) && $product->is_type('variation')){
