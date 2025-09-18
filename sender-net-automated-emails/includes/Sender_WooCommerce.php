@@ -734,10 +734,18 @@ class Sender_WooCommerce
                 $wcProduct=wc_get_product($product->ID);
                 if(!$wcProduct){continue;}
 
+                if ($wcProduct->is_type('variation')) {
+                    $parent_id   = $wcProduct->get_parent_id();
+                    $parent      = wc_get_product($parent_id);
+                    $sku = $parent ? $parent->get_sku() : '';
+                } else {
+                    $sku = $wcProduct->get_sku();
+                }
+
                 $productExportData[] = [
                     'title' => $product->post_title,
                     'description' => Sender_Helper::getProductShortText($wcProduct),
-                    'sku' => $wcProduct->get_sku() ?: $product->sku,
+                    'sku' => $sku ?: $product->sku,
                     'quantity' => $wcProduct->get_stock_quantity() ?? $product->stock_quantity,
                     'remote_productId' => $product->ID,
                     'image' => [Sender_Helper::getProductImageUrl($wcProduct)],

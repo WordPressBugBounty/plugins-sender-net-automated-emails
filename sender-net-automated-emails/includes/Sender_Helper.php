@@ -30,6 +30,8 @@ class Sender_Helper
     #POST_META
     CONST SENDER_CART_META = 'sender_remote_id';
 
+    const SENDER_CART_DATA = '_sender_cart_data';
+
     const ORDER_NOT_PAID_STATUSES = [
         self::ORDER_ON_HOLD,
         self::ORDER_PENDING_PAYMENT
@@ -44,6 +46,7 @@ class Sender_Helper
     const TRANSIENT_SENDER_X_RATE = 'sender_api_rate_limited';
 
     const SENDER_JS_FILE_NAME = 'sender-wordpress-plugin';
+    const TRANSIENT_SENDER_THANK_YOU = 'sender_thankyou_seen_';
 
     public static function handleChannelStatus($sender_newsletter = null)
     {

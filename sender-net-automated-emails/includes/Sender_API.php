@@ -179,6 +179,13 @@ class Sender_API
         register_shutdown_function([$this, $callback], $params);
     }
 
+    public function senderApiShutdownCallbackMulti($callback, array $params)
+    {
+        register_shutdown_function(function() use ($callback, $params) {
+            call_user_func_array([$this, $callback], $params);
+        });
+    }
+
     public function senderGetResourceKey()
     {
         $key = get_option('sender_resource_key');
