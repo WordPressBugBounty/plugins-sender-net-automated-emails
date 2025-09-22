@@ -708,63 +708,101 @@ class Sender_WooCommerce
 
     public function exportProducts()
     {
-        global $wpdb;
-        $productsCount = $wpdb->get_var('SELECT COUNT(*) FROM ' . $this->tablePrefix . 'posts 
-                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
+        try {
+            global $wpdb;
+            $productsCount = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $this->tablePrefix . 'posts 
+                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup 
+                          ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
                       WHERE post_type = "product"');
 
-        $this->logExportDebugInfo('ExportProducts', "Total products: $productsCount");
+            if ($wpdb->last_error) {
+                $this->logExportDebugInfo('DB Error', $wpdb->last_error);
+                return false;
+            }
 
-        $chunkSize = 10;
-        $productsExported = 0;
-        $loopTimes = floor($productsCount / $chunkSize);
-        $currency = get_woocommerce_currency();
+            $this->logExportDebugInfo('ExportProducts', "Total products: $productsCount");
 
-        for ($x = 0; $x <= $loopTimes; $x++) {
-            $productExportData = [];
-            $products = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'posts 
-                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
+            $chunkSize = 10;
+            $productsExported = 0;
+            $loopTimes = ceil($productsCount / $chunkSize);
+            $currency = get_woocommerce_currency();
+
+            for ($x = 0; $x < $loopTimes; $x++) {
+                $productExportData = [];
+                $products = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'posts 
+                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup 
+                          ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
                       WHERE post_type = "product"
                       ORDER BY ' . $this->tablePrefix . 'posts.ID ASC LIMIT ' . $chunkSize . '
              OFFSET ' . $productsExported);
 
-            $this->logExportDebugInfo('Export Chunk', "Offset: $productsExported | Products Fetched: " . count($products));
-
-            foreach ($products as $product) {
-                $wcProduct=wc_get_product($product->ID);
-                if(!$wcProduct){continue;}
-
-                if ($wcProduct->is_type('variation')) {
-                    $parent_id   = $wcProduct->get_parent_id();
-                    $parent      = wc_get_product($parent_id);
-                    $sku = $parent ? $parent->get_sku() : '';
-                } else {
-                    $sku = $wcProduct->get_sku();
+                if ($wpdb->last_error) {
+                    $this->logExportDebugInfo('DB Error', $wpdb->last_error);
+                    break;
                 }
 
-                $productExportData[] = [
-                    'title' => $product->post_title,
-                    'description' => Sender_Helper::getProductShortText($wcProduct),
-                    'sku' => $sku ?: $product->sku,
-                    'quantity' => $wcProduct->get_stock_quantity() ?? $product->stock_quantity,
-                    'remote_productId' => $product->ID,
-                    'image' => [Sender_Helper::getProductImageUrl($wcProduct)],
-                    'price' => number_format((float)$product->max_price,2),
-                    'status' => $product->post_status,
-                    'created_at' => $product->post_date,
-                    'updated_at' => $product->post_modified,
-                    'currency' => $currency,
-                ];
+                $this->logExportDebugInfo('Export Chunk', "Offset: $productsExported | Products Fetched: " . count($products));
+
+                foreach ($products as $product) {
+                    $wcProduct = wc_get_product($product->ID);
+                    if (!$wcProduct) {
+                        $this->logExportDebugInfo('Skipped', "Product ID {$product->ID} could not be loaded");
+                        continue;
+                    }
+
+                    if ($wcProduct->is_type('variation')) {
+                        $parent_id = $wcProduct->get_parent_id();
+                        $parent    = wc_get_product($parent_id);
+                        $sku = $parent ? $parent->get_sku() : '';
+                    } else {
+                        $sku = $wcProduct->get_sku();
+                    }
+
+                    $productExportData[] = [
+                            'title'       => $product->post_title,
+                            'description' => Sender_Helper::getProductShortText($wcProduct),
+                            'sku'         => $sku,
+                            'quantity'    => (int) ($wcProduct->get_stock_quantity() ?? 0),
+                            'remote_productId' => $product->ID,
+                            'image'       => [Sender_Helper::getProductImageUrl($wcProduct)],
+                            'price'       => number_format((float)$wcProduct->get_price(), 2),
+                            'status'      => $product->post_status,
+                            'created_at'  => $product->post_date,
+                            'updated_at'  => $product->post_modified,
+                            'currency'    => $currency,
+                    ];
+                }
+
+                $productsExported += count($products);
+
+                $this->checkRateLimitation();
+
+                if (!empty($productExportData)) {
+                    $response = $this->sender->senderApi->senderExportData(['products' => $productExportData]);
+
+                    if (is_array($response) && isset($response['error'])) {
+                        $this->logExportDebugInfo('API Error', json_encode($response));
+                    } elseif (is_object($response) && property_exists($response, 'error')) {
+                        $this->logExportDebugInfo('API Error', json_encode($response));
+                    }
+                }
             }
 
-            $productsExported += $chunkSize;
-
-            $this->checkRateLimitation();
-            $this->sender->senderApi->senderExportData(['products' => $productExportData]);
+            $this->logExportDebugInfo('ExportProducts', "Export complete. Total exported: $productsExported");
+            return true;
+        } catch (\Throwable $e) {
+            $this->logExportDebugInfo(
+                    'Fatal Export Error',
+                    sprintf(
+                            '%s in %s on line %d | Trace: %s',
+                            $e->getMessage(),
+                            $e->getFile(),
+                            $e->getLine(),
+                            substr($e->getTraceAsString(), 0, 500)
+                    )
+            );
+            return false;
         }
-
-        $this->logExportDebugInfo('ExportProducts', "Export complete. Total exported: $productsExported");
-        return true;
     }
 
     public function exportOrders()

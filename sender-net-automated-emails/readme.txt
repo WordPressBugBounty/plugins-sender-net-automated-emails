@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 6.8.2
 Requires PHP: 7.1
-Stable tag: 2.9.14
+Stable tag: 2.9.15
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -384,3 +384,5 @@ purchased
 * Reduce image size for cart products
 = 2.9.14 2025-09-18 =
 * Fallback schedule checkout process and use parent sku when variation
+= 2.9.15 2025-09-22 =
+* Handle exported products fix
