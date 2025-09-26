@@ -483,16 +483,6 @@ class Sender_Carts
 
             $wc = $this->senderGetWoo();
 
-            // Recalculate totals only if Woo says it's needed (avoids recursion)
-            if ($wc && $wc->cart && method_exists($wc->cart, 'needs_calculation')) {
-                if ($wc->cart->needs_calculation()) {
-                    $wc->cart->calculate_totals();
-                }
-            } elseif ($wc && $wc->cart) {
-                // Fallback for older Woo: still recalc once
-                $wc->cart->calculate_totals();
-            }
-
             $items = $this->senderGetCart();
             $cartData = serialize($items);
 
