@@ -16,8 +16,6 @@ class Sender_API
         if( !function_exists('get_plugin_data') ){
             require_once( ABSPATH . 'wp-admin/includes/plugin.php' );
         }
-
-        add_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
     }
 
     public function senderPluginVersionUserAgent($user_agent)
@@ -55,15 +53,41 @@ class Sender_API
         return $this->senderGetBaseArguments();
     }
 
+    private function sender_remote_request($url, $args = []) {
+        add_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
+        try {
+            return wp_remote_request($url, $args);
+        } finally {
+            remove_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
+        }
+    }
+
+    private function sender_remote_post($url, $args = []) {
+        add_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
+        try {
+            return wp_remote_post($url, $args);
+        } finally {
+            remove_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
+        }
+    }
+
     public function senderGetAccount()
     {
-        $data = wp_remote_request($this->senderBaseUrl . 'users', $this->senderBaseRequestArguments());
+        $data = $this->sender_remote_request(
+            $this->senderBaseUrl . 'users',
+            $this->senderBaseRequestArguments()
+        );
+
         return $this->senderBuildResponse($data);
     }
 
     public function senderGetForms()
     {
-        $data = wp_remote_request($this->senderBaseUrl . 'forms?type=embed&is_active=1&limit=100', $this->senderBaseRequestArguments());
+        $data = $this->sender_remote_request(
+            $this->senderBaseUrl . 'forms?type=embed&is_active=1&limit=100',
+            $this->senderBaseRequestArguments()
+        );
+
         return $this->senderBuildResponse($data);
     }
 
@@ -73,7 +97,11 @@ class Sender_API
         $allGroups = [];
 
         do {
-            $data = wp_remote_request($this->senderBaseUrl . 'tags?limit=1000&page=' . $page, $this->senderBaseRequestArguments());
+            $data = $this->sender_remote_request(
+                $this->senderBaseUrl . 'tags?limit=1000&page=' . $page,
+                $this->senderBaseRequestArguments()
+            );
+
             $response = $this->senderBuildResponse($data);
             if (!isset($response->data)){
                 return false;
@@ -90,7 +118,10 @@ class Sender_API
 
     public function senderGetCart($cartHash)
     {
-        $data = wp_remote_request($this->senderStatsBaseUrl . 'carts/' . $cartHash, $this->senderBaseRequestArguments());
+        $data = $this->sender_remote_request(
+            $this->senderStatsBaseUrl . 'carts/' . $cartHash,
+            $this->senderBaseRequestArguments()
+        );
         return $this->senderBuildStatsResponse($data);
     }
 
@@ -98,7 +129,10 @@ class Sender_API
     {
         $data = ['resource_key' => $this->senderGetResourceKey()];
         $params = array_merge($this->senderBaseRequestArguments(true), ['body' => json_encode($data)]);
-        $response = wp_remote_request($this->senderStatsBaseUrl . 'carts/' . $wpCartId, $params);
+        $response = $this->sender_remote_request(
+            $this->senderStatsBaseUrl . 'carts/' . $wpCartId,
+            $params
+        );
 
         return $this->senderBuildStatsResponse($response);
     }
@@ -108,7 +142,10 @@ class Sender_API
         $cartParams['resource_key'] = $this->senderGetResourceKey();
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartParams), 'method' => 'PATCH']);
 
-        $response = wp_remote_request($this->senderStatsBaseUrl . 'carts/' . $cartParams['external_id'], $params);
+        $response = $this->sender_remote_request(
+            $this->senderStatsBaseUrl . 'carts/' . $cartParams['external_id'],
+            $params
+        );
 
         return $this->senderBuildStatsResponse($response);
     }
@@ -116,7 +153,29 @@ class Sender_API
     public function senderTrackRegisteredUsers($userId)
     {
         $user = get_userdata($userId);
-        $list = get_option('sender_registration_list');
+        if (!$user) {
+            return;
+        }
+
+        $list = '';
+        $roles = (array) ($user->roles ?? []);
+        $mappingEnabled = get_option('sender_enable_role_group_mapping');
+        $map = (array) get_option('sender_role_group_map') ?: [];
+
+        if ($mappingEnabled) {
+            foreach ($roles as $r) {
+                if (!empty($map[$r])) {
+                    $list = trim($map[$r]);
+                    break;
+                }
+            }
+
+            if (empty($list)) {
+                $list = get_option('sender_registration_list');
+            }
+        } else {
+            $list = get_option('sender_registration_list');
+        }
 
         if (isset($user->user_email)) {
             $firstname = !empty($user->first_name) ? $user->first_name : get_user_meta($userId, 'billing_first_name', true);
@@ -130,13 +189,14 @@ class Sender_API
                 'lastname' => $lastname,
                 'store_id' => get_option('sender_store_register') ?: '',
                 'customer_id' => $userId,
+                'ip_address'   => Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address()),
             ];
 
             if (!empty($phone)){
                 $data['phone'] = $phone;
             }
 
-            if ($list) {
+            if (!empty($list)) {
                 $data['list_id'] = $list;
             }
 
@@ -146,11 +206,11 @@ class Sender_API
                 }
             }
 
-            $data['ip_address'] = Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address());
+            $params = array_merge($this->senderBaseRequestArguments(), [
+                'body' => json_encode($data),
+            ]);
 
-            $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data)]);
-            $response = wp_remote_post($this->senderStatsBaseUrl . 'create_subscriber', $params);
-
+            $response = $this->sender_remote_post($this->senderStatsBaseUrl . 'create_subscriber', $params);
             return $this->senderBuildStatsResponse($response);
         }
     }
@@ -162,8 +222,15 @@ class Sender_API
             $userData['ip_address'] = Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address());
             $userData['resource_key'] = $this->senderGetResourceKey();
 
+            if (isset($userData['newsletter'])) {
+                $userData['newsletter'] = (bool) $userData['newsletter'];
+            }
+
             $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($userData)]);
-            $response = wp_remote_post($this->senderStatsBaseUrl . 'create_subscriber', $params);
+            $response = $this->sender_remote_post(
+                $this->senderStatsBaseUrl . 'create_subscriber',
+                $params
+            );
 
             return $this->senderBuildStatsResponse($response);
         }
@@ -231,7 +298,10 @@ class Sender_API
 
     public function senderGetStore()
     {
-        $response = wp_remote_request($this->senderBaseUrl . 'stores/' . get_option('sender_store_register'), $this->senderBaseRequestArguments());
+        $response = $this->sender_remote_request(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register'),
+            $this->senderBaseRequestArguments()
+        );
 
         return $this->senderBuildResponse($response);
     }
@@ -251,7 +321,10 @@ class Sender_API
 
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($storeParams)]);
 
-        $response = wp_remote_post($this->senderBaseUrl . 'stores', $params);
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores',
+            $params
+        );
 
         return $this->senderBuildResponse($response);
     }
@@ -263,7 +336,10 @@ class Sender_API
         ];
 
         $removingStoreParams = array_merge($this->senderBaseRequestArguments(true), ['body' => json_encode($bodyParams)]);
-        $response = wp_remote_request($this->senderBaseUrl . 'stores/' . get_option('sender_store_register'), $removingStoreParams);
+        $response = $this->sender_remote_request(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register'),
+            $removingStoreParams
+        );
 
         return $this->senderBuildResponse($response);
     }
@@ -272,7 +348,10 @@ class Sender_API
     {
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($exportData), 'data_format' => 'body']);
 
-        $response = wp_remote_post($this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/import_shop_data', $params);
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/import_shop_data',
+            $params
+        );
 
         return $this->senderBuildResponse($response);
     }
@@ -287,7 +366,10 @@ class Sender_API
 
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => $jsonBody]);
 
-        $response = wp_remote_post($this->senderStatsBaseUrl . 'carts', $params);
+        $response = $this->sender_remote_post(
+            $this->senderStatsBaseUrl . 'carts',
+            $params
+        );
 
         return $this->senderBuildStatsResponse($response);
     }
@@ -299,14 +381,21 @@ class Sender_API
         $data['resource_key'] = $this->senderGetResourceKey();
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data), 'method' => 'PATCH']);
 
-        $response = wp_remote_request($this->senderStatsBaseUrl . 'subscribers/store/update', $params);
+        $response = $this->sender_remote_request(
+            $this->senderStatsBaseUrl . 'subscribers/store/update',
+            $params
+        );
+
         return $this->senderBuildResponse($response);
     }
 
     public function deleteSubscribers(array $data)
     {
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data), 'method' => 'DELETE']);
-        $response = wp_remote_request($this->senderBaseUrl . 'subscribers/' , $params);
+        $response = $this->sender_remote_request(
+            $this->senderBaseUrl . 'subscribers/',
+            $params
+        );
 
         return $this->senderBuildResponse($response);
     }
@@ -316,7 +405,8 @@ class Sender_API
         $url = $this->senderStatsBaseUrl . 'carts/' . $cartId . '/convert';
 
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartData)]);
-        $response = wp_remote_post($url, $params);
+        $response = $this->sender_remote_post($url, $params);
+
         return $this->senderBuildStatsResponse($response);
     }
 
@@ -325,7 +415,8 @@ class Sender_API
         $url = $this->senderStatsBaseUrl . 'carts/' . $cartId . '/status';
 
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartStatusData), 'method' => 'PATCH']);
-        $response = wp_remote_post($url, $params);
+        $response = $this->sender_remote_post($url, $params);
+
         return $this->senderBuildStatsResponse($response);
     }
 
@@ -335,7 +426,11 @@ class Sender_API
             return;
         }
 
-        $response = wp_remote_request($this->senderBaseUrl . 'subscribers/' . $email, $this->senderBaseRequestArguments());
+        $response = $this->sender_remote_request(
+            $this->senderBaseUrl . 'subscribers/' . $email,
+            $this->senderBaseRequestArguments()
+        );
+
         return $this->senderBuildResponse($response);
     }
 }

@@ -16,8 +16,8 @@ class Sender_Carts
     const UPDATE_CART = 'sender-update-cart';
 
     const FRAGMENTS_FILTERS = [
-        'woocommerce_add_to_cart_fragments',
-        'woocommerce_update_order_review_fragments'
+            'woocommerce_add_to_cart_fragments',
+            'woocommerce_update_order_review_fragments'
     ];
 
     const SENDER_SUBSCRIBER_ID = 'sender_subscriber_id';
@@ -28,13 +28,14 @@ class Sender_Carts
         $this->sender = $sender;
 
         $this->senderAddCartsActions()
-            ->senderAddCartsFilters();
+                ->senderAddCartsFilters();
     }
 
     private function senderAddCartsActions()
     {
         //Handle cart changes and convert
         add_action('woocommerce_checkout_order_processed', [$this, 'senderLoadOrderForConvert'], 10, 1);
+
         add_action('woocommerce_store_api_checkout_order_processed', [$this, 'prepareConvertCart']);
         add_action('woocommerce_cart_updated', [$this, 'senderCartUpdated']);
 
@@ -55,8 +56,8 @@ class Sender_Carts
         add_action('woocommerce_register_form', [$this, 'senderAddNewsletterCheck']);
 
         //Handle sender_newsletter on create/update account
-        add_action('woocommerce_created_customer', [$this, 'senderNewsletterHandle'], 10, 1);
-        add_action('woocommerce_save_account_details', [$this, 'senderNewsletterHandle'], 10, 1);
+        add_action('sender_track_user_action', [$this, 'trackUser']);
+        add_action('woocommerce_save_account_details', [$this, 'trackUser'], 10, 1);
 
         //Handle admin order edit subscribe to newsletter
         add_action('woocommerce_admin_order_data_after_shipping_address', [$this, 'senderAddNewsletterCheck']);
@@ -83,29 +84,38 @@ class Sender_Carts
     private function senderAddCartsFilters()
     {
         add_filter('template_include', [&$this, 'senderRecoverCart'], 99, 1);
-
+        add_filter('template_include', [$this, 'senderInjectThankYouScript'], 999);
         return $this;
     }
 
-    public function senderNewsletterHandle($userId)
+    public function senderWpNewsletterHandle($userId):void
     {
+        $user = get_userdata($userId);
+        if (! $user || empty($user->user_email)) {
+            return;
+        }
+        $email = strtolower($user->user_email);
+
         if (!empty($_POST['sender_newsletter'])) {
             update_user_meta($userId, 'email_marketing_consent', Sender_Helper::generateEmailMarketingConsent(Sender_Helper::SUBSCRIBED));
-            $this->sender->senderApi->updateCustomer([
-                'subscriber_status' => Sender_Helper::UPDATE_STATUS_ACTIVE,
-                'sms_status' => Sender_Helper::UPDATE_STATUS_ACTIVE
-            ], get_userdata($userId)->user_email);
+            $payload = ['subscriber_status' => Sender_Helper::UPDATE_STATUS_ACTIVE];
         } else {
             if (Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
                 update_user_meta(
-                    $userId,
-                    Sender_Helper::EMAIL_MARKETING_META_KEY,
-                    Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
+                        $userId,
+                        Sender_Helper::EMAIL_MARKETING_META_KEY,
+                        Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
                 );
-                $this->sender->senderApi->updateCustomer([
-                    'subscriber_status' => Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED,
-                    'sms_status' => Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED
-                ], get_userdata($userId)->user_email);
+                $payload = ['subscriber_status' => Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED];
+            }
+        }
+
+        if (isset($payload)) {
+            if (function_exists('as_enqueue_async_action')) {
+                as_enqueue_async_action(
+                        'sender_update_customer_background',
+                        [$email, $payload]
+                );
             }
         }
     }
@@ -129,10 +139,10 @@ class Sender_Carts
             $this->senderUserId = $senderUser->id;
 
             $visitorData = [
-                'email' => $order->get_billing_email(),
-                'firstname' => $order->get_billing_first_name(),
-                'lastname' => $order->get_billing_last_name(),
-                'phone' => $order->get_billing_phone(),
+                    'email' => $order->get_billing_email(),
+                    'firstname' => $order->get_billing_first_name(),
+                    'lastname' => $order->get_billing_last_name(),
+                    'phone' => $order->get_billing_phone(),
             ];
 
             if(isset($newsletter)){
@@ -185,11 +195,11 @@ class Sender_Carts
         }
 
         $cart = (new Sender_Cart())->findByAttributes(
-            [
-                'user_id' => $senderUser->id,
-                'cart_status' => 0
-            ],
-            'created DESC'
+                [
+                        'user_id' => $senderUser->id,
+                        'cart_status' => 0
+                ],
+                'created DESC'
         );
 
         if(!$cart || $cart->cart_status === (int) Sender_Helper::CONVERTED_CART){
@@ -205,15 +215,15 @@ class Sender_Carts
         } else {
             if (Sender_Helper::shouldChangeChannelStatus($orderId, 'order')) {
                 update_post_meta(
-                    $orderId,
-                    Sender_Helper::EMAIL_MARKETING_META_KEY,
-                    Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
+                        $orderId,
+                        Sender_Helper::EMAIL_MARKETING_META_KEY,
+                        Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
                 );
             } elseif (is_user_logged_in() && Sender_Helper::shouldChangeChannelStatus(get_current_user_id(), 'user')) {
                 update_user_meta(
-                    get_current_user_id(),
-                    Sender_Helper::EMAIL_MARKETING_META_KEY,
-                    Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
+                        get_current_user_id(),
+                        Sender_Helper::EMAIL_MARKETING_META_KEY,
+                        Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
                 );
             }
         }
@@ -222,7 +232,7 @@ class Sender_Carts
             $this->trackUser();
         }
 
-        set_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT, '1', 5);
+        set_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT, '1', 300);
 
         return true;
     }
@@ -258,11 +268,11 @@ class Sender_Carts
         }
 
         $cart = (new Sender_Cart())->findByAttributes(
-            [
-                'user_id' => $senderUser->id,
-                'cart_status' => Sender_Helper::CONVERTED_CART
-            ],
-            'created DESC'
+                [
+                        'user_id' => $senderUser->id,
+                        'cart_status' => Sender_Helper::CONVERTED_CART
+                ],
+                'created DESC'
         );
 
         if (!$cart){
@@ -285,48 +295,48 @@ class Sender_Carts
         $payment_method = $wcOrder->get_payment_method_title();
 
         $billing = [
-            'first_name' => $wcOrder->get_billing_first_name(),
-            'last_name' => $wcOrder->get_billing_last_name(),
-            'address' => $wcOrder->get_billing_address_1(),
-            'city' => $wcOrder->get_billing_city(),
-            'state' => $wcOrder->get_billing_state(),
-            'zip' => $wcOrder->get_billing_postcode(),
-            'country' => $wcOrder->get_billing_country(),
-            'customer_ip' => $wcOrder->get_customer_ip_address(),
+                'first_name' => $wcOrder->get_billing_first_name(),
+                'last_name' => $wcOrder->get_billing_last_name(),
+                'address' => $wcOrder->get_billing_address_1(),
+                'city' => $wcOrder->get_billing_city(),
+                'state' => $wcOrder->get_billing_state(),
+                'zip' => $wcOrder->get_billing_postcode(),
+                'country' => $wcOrder->get_billing_country(),
+                'customer_ip' => $wcOrder->get_customer_ip_address(),
         ];
 
         $shipping = [
-            'first_name' => $wcOrder->get_shipping_first_name(),
-            'last_name' => $wcOrder->get_shipping_last_name(),
-            'address' => $wcOrder->get_shipping_address_1(),
-            'city' => $wcOrder->get_shipping_city(),
-            'state' => $wcOrder->get_shipping_state(),
-            'zip' => $wcOrder->get_shipping_postcode(),
-            'country' => $wcOrder->get_shipping_country(),
-            'shipping_charge' => number_format($shipping_charge, 2),
-            'payment_method' => $payment_method,
+                'first_name' => $wcOrder->get_shipping_first_name(),
+                'last_name' => $wcOrder->get_shipping_last_name(),
+                'address' => $wcOrder->get_shipping_address_1(),
+                'city' => $wcOrder->get_shipping_city(),
+                'state' => $wcOrder->get_shipping_state(),
+                'zip' => $wcOrder->get_shipping_postcode(),
+                'country' => $wcOrder->get_shipping_country(),
+                'shipping_charge' => number_format($shipping_charge, 2),
+                'payment_method' => $payment_method,
         ];
 
         $orderDetails = [
-            'total' => number_format($total, 2),
-            'subtotal' => number_format($subtotal, 2),
-            'discount' => number_format($discount, 2),
-            'tax' => number_format($tax, 2),
-            'order_date' => $order_date,
+                'total' => number_format($total, 2),
+                'subtotal' => number_format($subtotal, 2),
+                'discount' => number_format($discount, 2),
+                'tax' => number_format($tax, 2),
+                'order_date' => $order_date,
         ];
 
         $cartData = [
-            'external_id' => $cart->id,
-            'email' => $email,
-            'firstname' => $firstname,
-            'lastname' => $lastname,
-            'resource_key' => $this->senderGetResourceKey(),
-            'phone' => $phone,
-            'order_id' => (string)$orderId,
-            'billing' => $billing,
-            'shipping' => $shipping,
-            'order_details' => $orderDetails,
-            'store_id' => get_option('sender_store_register') ?: '',
+                'external_id' => $cart->id,
+                'email' => $email,
+                'firstname' => $firstname,
+                'lastname' => $lastname,
+                'resource_key' => $this->senderGetResourceKey(),
+                'phone' => $phone,
+                'order_id' => (string)$orderId,
+                'billing' => $billing,
+                'shipping' => $shipping,
+                'order_details' => $orderDetails,
+                'store_id' => get_option('sender_store_register') ?: ''
         ];
 
         if ($list) {
@@ -340,7 +350,7 @@ class Sender_Carts
 
         update_post_meta($orderId, Sender_Helper::SENDER_CART_META, $cart->id);
         update_post_meta($orderId, Sender_Helper::SENDER_CART_DATA, $cartData);
-        do_action('sender_get_customer_data', $email, true);
+        do_action('sender_update_customer_data', $email, true);
 
         if (is_user_logged_in()) {
             set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 0);
@@ -376,16 +386,16 @@ class Sender_Carts
         }
 
         $data = [
-            "external_id" => $cart->id,
-            "url" => $cartUrl,
-            "currency" => get_woocommerce_currency(),
-            "order_total" => (string)$total,
-            "products" => [],
-            'resource_key' => $this->senderGetResourceKey(),
-            'store_id' => $storeId,
-            'email' => $user->email,
-            'subscriber_id' => $user->sender_subscriber_id,
-            'ip_address' => Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address()),
+                "external_id" => $cart->id,
+                "url" => $cartUrl,
+                "currency" => get_woocommerce_currency(),
+                "order_total" => (string)$total,
+                "products" => [],
+                'resource_key' => $this->senderGetResourceKey(),
+                'store_id' => $storeId,
+                'email' => $user->email,
+                'subscriber_id' => $user->sender_subscriber_id,
+                'ip_address' => Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address()),
         ];
 
         foreach ($items as $item => $values) {
@@ -394,11 +404,16 @@ class Sender_Carts
             $regularPrice = (float) $_product->get_regular_price();
             $salePrice = (float) $_product->get_sale_price();
 
-            if ($regularPrice <= 0) {
-                $regularPrice = 1;
-            }
+            // Default to current price (sale or regular)
+            $price = $salePrice > 0 ? $salePrice : $regularPrice;
+            $discount = 0;
+            $oldPrice = null;
 
-            $discount = round(100 - ($salePrice / $regularPrice * 100));
+            // Only calculate discount if sale price is valid and lower than regular price
+            if ($salePrice > 0 && $salePrice < $regularPrice) {
+                $discount = round(100 - ($salePrice / $regularPrice * 100));
+                $oldPrice = $regularPrice;
+            }
 
             $image_url = Sender_Helper::getProductImageUrl($_product);
             $description = Sender_Helper::getProductShortText($_product);
@@ -412,15 +427,19 @@ class Sender_Carts
             }
 
             $prod = [
-                'sku' => (string) $sku,
-                'name' => (string)$_product->get_title(),
-                'price' => (string)$regularPrice,
-                'discount' => (string)$discount,
-                'qty' => $values['quantity'],
-                'image' => $image_url,
-                'product_id' => $_product->get_id(),
-                'description' => $description,
+                    'sku' => (string) $sku,
+                    'name' => (string)$_product->get_title(),
+                    'price' => (string) $price,
+                    'qty' => $values['quantity'],
+                    'image' => $image_url,
+                    'product_id' => $_product->get_id(),
+                    'description' => $description,
             ];
+
+            if ($oldPrice !== null) {
+                $prod['old_price'] = (string) $oldPrice;
+                $prod['discount'] = (string) $discount;
+            }
 
             $data['products'][] = $prod;
         }
@@ -441,8 +460,11 @@ class Sender_Carts
 
         $wpUser = wp_get_current_user();
         $wpId = $wpUser->ID;
-
         $user = (new Sender_User())->findBy('wp_user_id', $wpId);
+
+        if (isset($_POST['sender_newsletter'])){
+            $this->senderWpNewsletterHandle($wpId);
+        }
 
         if (!$user) {
             $user = new Sender_User();
@@ -450,35 +472,34 @@ class Sender_Carts
             $user->email = strtolower($wpUser->user_email);
             $user->save();
             $this->sender->senderApi->senderTrackRegisteredUsers($wpId);
+            return true;
         }
 
-        if (isset($_POST['sender_newsletter'])){
-            $this->senderNewsletterHandle($wpId);
-        }
-
-        if ($user->isDirty()) {
-            $this->sender->senderApi->senderApiShutdownCallback("senderTrackRegisteredUsers", $wpId);
-        }
-
-        $emailMarketingConsent = get_user_meta($wpId, Sender_Helper::EMAIL_MARKETING_META_KEY, true);
-        if (empty($emailMarketingConsent)) {
-            $this->updateUserEmailMarketingConsent($user->email, $wpId);
-        }
+        $this->sender->senderApi->senderApiShutdownCallback("senderTrackRegisteredUsers", $wpId);
 
         return true;
     }
 
+    /**
+     * @return array|null
+     */
     public function senderCartUpdated()
     {
-        if (isset($_GET['hash'])) { return; }
+        if (isset($_GET['hash'])) { return null; }
 
         // prevent re-entrance / recursion
-        if ($this->inSenderCartUpdated) { return; }
+        if ($this->inSenderCartUpdated) { return null; }
+
+        // If we already prepared conversion for this request/session, do not create/update carts
+        if (get_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT)) {
+            return null;
+        }
+
         $this->inSenderCartUpdated = true;
 
         try {
             if (!$this->senderUserId && !$this->trackUser() && !isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
-                return;
+                return null;
             }
 
             $wc = $this->senderGetWoo();
@@ -500,6 +521,13 @@ class Sender_Carts
 
             // If Woo cart is empty now, delete mapped Sender cart and stop
             if (empty($items)) {
+                if (function_exists('is_order_received_page') && is_order_received_page()) {
+                    return null;
+                }
+                if (get_transient(Sender_Helper::TRANSIENT_PREPARE_CONVERT)) {
+                    return null;
+                }
+
                 $toDelete = ($cart instanceof Sender_Cart) ? $cart : $this->senderFindActiveCart();
                 if ($toDelete instanceof Sender_Cart) {
                     if ($toDelete->cart_status != Sender_Helper::CONVERTED_CART && $toDelete->status !== Sender_Helper::UNPAID_CART) {
@@ -508,7 +536,7 @@ class Sender_Carts
                     }
                 }
                 $this->senderClearActiveCartSessionMap();
-                return;
+                return null;
             }
 
             // Find possible existing open cart for current user/visitor
@@ -540,28 +568,43 @@ class Sender_Carts
                 $updatedCart = (new Sender_Cart())->find($cart->id);
 
                 if ($oldUpdatedValue === $updatedCart->updated){
-                    return;
+                    return [
+                            'status' => 'skipped',
+                            'reason' => 'cart_unchanged'
+                    ];
                 }
 
                 $payload = $this->senderPrepareCartData($cart);
-                if (!$payload) { return; }
+                if (!$payload) { return ['payload' => null]; }
 
                 if (wp_doing_ajax()) {
                     if (get_option('woocommerce_cart_redirect_after_add') === 'yes') {
                         $this->sender->senderApi->senderApiShutdownCallback("senderUpdateCart", $payload);
-                        return;
+                        return [
+                                'status' => 'sent',
+                                'method' => 'update',
+                                'payload' => $payload,
+                        ];
                     }
                     $this->handleCartFragmentsFilters(json_encode($payload), self::UPDATE_CART);
+                    return $payload;
                 } else {
                     $this->sender->senderApi->senderApiShutdownCallback("senderUpdateCart", $payload);
+                    return [
+                            'status' => 'queued',
+                            'method' => 'update',
+                            'payload' => $payload,
+                    ];
                 }
-                return;
             }
 
             // Create new cart
             if (!$this->senderUserId && !$senderUser) {
                 $senderUser = $this->senderGetVisitor();
-                if (!$senderUser) { return; }
+                if (!$senderUser) { return [
+                        'status' => 'skipped',
+                        'reason' => 'no_sender_user'
+                ]; }
             }
 
             $newCart = new Sender_Cart();
@@ -574,22 +617,39 @@ class Sender_Carts
             }
 
             $payload = $this->senderPrepareCartData($newCart);
-            if (!$payload) { return; }
+            if (!$payload) { return ['payload' => null]; }
 
             if ($this->senderUserId) {
-                $this->sender->senderApi->senderTrackCart($payload);
-                return;
+                $response = $this->sender->senderApi->senderTrackCart($payload);
+                return [
+                        'status' => 'sent',
+                        'payload' => $payload,
+                        'response' => $response
+                ];
             }
 
             if (wp_doing_ajax()) {
                 if (get_option('woocommerce_cart_redirect_after_add') === 'yes') {
                     $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $payload);
-                    return;
+                    return [
+                            'status' => 'queued',
+                            'method' => 'create',
+                            'payload' => $payload,
+                    ];
                 }
-                $this->sender->senderApi->senderTrackCart($payload);
-                return;
+                $response = $this->sender->senderApi->senderTrackCart($payload);
+                return [
+                        'status' => 'sent',
+                        'payload' => $payload,
+                        'response' => $response
+                ];
             } else {
                 $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $payload);
+                return [
+                        'status' => 'queued',
+                        'method' => 'create',
+                        'payload' => $payload,
+                ];
             }
         } finally {
             $this->inSenderCartUpdated = false;
@@ -646,18 +706,31 @@ class Sender_Carts
 
     public function senderGetCart()
     {
-        return $this->senderGetWoo()->cart->get_cart();
+        $woo = $this->senderGetWoo();
+
+        if (!$woo || !isset($woo->cart) || !is_object($woo->cart)) {
+            return [];
+        }
+
+        try {
+            return $woo->cart->get_cart();
+        } catch (Throwable $e) {
+            return [];
+        }
     }
 
     public function senderGetWoo()
     {
-        global $woocommerce;
-
-        if (function_exists('WC')) {
+        if (function_exists('WC') && WC() instanceof WooCommerce) {
             return WC();
         }
 
-        return $woocommerce;
+        global $woocommerce;
+        if ($woocommerce instanceof WooCommerce) {
+            return $woocommerce;
+        }
+
+        return null;
     }
 
     public function senderGetResourceKey()
@@ -686,13 +759,17 @@ class Sender_Carts
                 $currentValue = get_option('sender_checkbox_newsletter_on_checkout') ? true : false;
             }
 
+            woocommerce_form_field(
+                    'sender_newsletter', ['type'  => 'hidden'], 0
+            );
+
             woocommerce_form_field('sender_newsletter', array(
-                'type' => 'checkbox',
-                'class' => array('form-row mycheckbox'),
-                'label_class' => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
-                'input_class' => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
-                'label' => get_option('sender_subscribe_to_newsletter_string'),
-                'checked' => get_option('sender_checkbox_newsletter_on_checkout') == '1',
+                    'type' => 'checkbox',
+                    'class' => array('form-row mycheckbox'),
+                    'label_class' => array('woocommerce-form__label woocommerce-form__label-for-checkbox checkbox'),
+                    'input_class' => array('woocommerce-form__input woocommerce-form__input-checkbox input-checkbox'),
+                    'label' => get_option('sender_subscribe_to_newsletter_string'),
+                    'checked' => get_option('sender_checkbox_newsletter_on_checkout') == '1',
             ), $currentValue);
         }
     }
@@ -720,11 +797,11 @@ class Sender_Carts
         $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
 
         if (empty($cartData)) {
-            return '';
-        }
-
-        if (!wp_next_scheduled('sender_check_thankyou_seen', [$order_id])) {
-            wp_schedule_single_event(time() + 60, 'sender_check_thankyou_seen', [$order_id]);
+            $this->senderConvertCart($order_id);
+            $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
+            if (empty($cartData)) {
+                return '';
+            }
         }
 
         ob_start(); ?>
@@ -765,7 +842,26 @@ class Sender_Carts
         }
 
         $sanitizedEmail = strtolower(sanitize_text_field($_POST['email']));
-        $response = $this->sender->senderApi->senderTrackNotRegisteredUsers(['email' => $sanitizedEmail]);
+        $senderUser = (new Sender_User())->findBy('email', $sanitizedEmail);
+        if ($senderUser && !empty($senderUser->wp_user_id) && get_user_by('id', $senderUser->wp_user_id)) {
+            $this->senderUserId = $senderUser->id;
+
+            $cartUpdateResponse = $this->senderCartUpdated();
+
+            return wp_send_json_success([
+                    'cart_response' => $cartUpdateResponse,
+                    'subscriber_response' => [
+                            'status' => 'existing_user'
+                    ],
+            ]);
+        }
+
+        $newsletter = isset($_POST['newsletter']) && (int) $_POST['newsletter'] === 1;
+        $trackNotRegisteredUserPayload = [
+                'email' => $sanitizedEmail,
+                'newsletter' => $newsletter
+        ];
+        $response = $this->sender->senderApi->senderTrackNotRegisteredUsers($trackNotRegisteredUserPayload);
 
         if (!$response || !isset($response->subscriber_id) || empty($response->subscriber_id)) {
             return wp_send_json_error('Subscriber not created');
@@ -793,11 +889,11 @@ class Sender_Carts
                 $currentUserSender = (new Sender_User())->findBy('sender_subscriber_id', $_COOKIE[self::SENDER_SUBSCRIBER_ID]);
                 if ($currentUserSender) {
                     $cart = (new Sender_Cart())->findByAttributes(
-                        [
-                            'user_id' => $currentUserSender->id,
-                            'cart_status' => 0
-                        ],
-                        'created DESC'
+                            [
+                                    'user_id' => $currentUserSender->id,
+                                    'cart_status' => 0
+                            ],
+                            'created DESC'
                     );
                 }
 
@@ -829,8 +925,11 @@ class Sender_Carts
         $cartUpdateResponse = $this->senderCartUpdated();
 
         return wp_send_json_success([
-            'cart_response'       => $cartUpdateResponse,
-            'subscriber_response' => $response,
+                'cart_response'       => $cartUpdateResponse,
+                'subscriber_response' => [
+                        'payload' => $trackNotRegisteredUserPayload ?? null,
+                        'response' => $response
+                ],
         ]);
     }
 
@@ -847,9 +946,9 @@ class Sender_Carts
         if (!empty($senderRemoteCartId)){
             #Check if cart exists
             $cart = (new Sender_Cart())->findByAttributes(
-                [
-                    'id' => $senderRemoteCartId,
-                ]
+                    [
+                            'id' => $senderRemoteCartId,
+                    ]
             );
 
             if (!$cart){
@@ -870,34 +969,34 @@ class Sender_Carts
                     $payment_method = $wcOrder->get_payment_method_title();
 
                     $billing = [
-                        'first_name' => $wcOrder->get_billing_first_name(),
-                        'last_name' => $wcOrder->get_billing_last_name(),
-                        'address' => $wcOrder->get_billing_address_1(),
-                        'city' => $wcOrder->get_billing_city(),
-                        'state' => $wcOrder->get_billing_state(),
-                        'zip' => $wcOrder->get_billing_postcode(),
-                        'country' => $wcOrder->get_billing_country(),
-                        'customer_ip' => $wcOrder->get_customer_ip_address(),
+                            'first_name' => $wcOrder->get_billing_first_name(),
+                            'last_name' => $wcOrder->get_billing_last_name(),
+                            'address' => $wcOrder->get_billing_address_1(),
+                            'city' => $wcOrder->get_billing_city(),
+                            'state' => $wcOrder->get_billing_state(),
+                            'zip' => $wcOrder->get_billing_postcode(),
+                            'country' => $wcOrder->get_billing_country(),
+                            'customer_ip' => $wcOrder->get_customer_ip_address(),
                     ];
 
                     $shipping = [
-                        'first_name' => $wcOrder->get_shipping_first_name(),
-                        'last_name' => $wcOrder->get_shipping_last_name(),
-                        'address' => $wcOrder->get_shipping_address_1(),
-                        'city' => $wcOrder->get_shipping_city(),
-                        'state' => $wcOrder->get_shipping_state(),
-                        'zip' => $wcOrder->get_shipping_postcode(),
-                        'country' => $wcOrder->get_shipping_country(),
-                        'shipping_charge' => number_format($shipping_charge, 2),
-                        'payment_method' => $payment_method,
+                            'first_name' => $wcOrder->get_shipping_first_name(),
+                            'last_name' => $wcOrder->get_shipping_last_name(),
+                            'address' => $wcOrder->get_shipping_address_1(),
+                            'city' => $wcOrder->get_shipping_city(),
+                            'state' => $wcOrder->get_shipping_state(),
+                            'zip' => $wcOrder->get_shipping_postcode(),
+                            'country' => $wcOrder->get_shipping_country(),
+                            'shipping_charge' => number_format($shipping_charge, 2),
+                            'payment_method' => $payment_method,
                     ];
 
                     $orderDetails = [
-                        'total' => number_format($total, 2),
-                        'subtotal' => number_format($subtotal, 2),
-                        'discount' => number_format($discount, 2),
-                        'tax' => number_format($tax, 2),
-                        'order_date' => $order_date,
+                            'total' => number_format($total, 2),
+                            'subtotal' => number_format($subtotal, 2),
+                            'discount' => number_format($discount, 2),
+                            'tax' => number_format($tax, 2),
+                            'order_date' => $order_date,
                     ];
 
                     $storeId = get_option('sender_store_register') ?: '';
@@ -907,17 +1006,17 @@ class Sender_Carts
                     }
 
                     $cartData = [
-                        'external_id' => $cart->id,
-                        'email' => strtolower($wcOrder->get_billing_email()),
-                        'firstname' => $wcOrder->get_billing_first_name(),
-                        'lastname' => $wcOrder->get_billing_last_name(),
-                        'resource_key' => $this->senderGetResourceKey(),
-                        'phone' => $wcOrder->get_billing_phone(),
-                        'order_id' => (string)$orderId,
-                        'billing' => $billing,
-                        'shipping' => $shipping,
-                        'order_details' => $orderDetails,
-                        'store_id' => $storeId,
+                            'external_id' => $cart->id,
+                            'email' => strtolower($wcOrder->get_billing_email()),
+                            'firstname' => $wcOrder->get_billing_first_name(),
+                            'lastname' => $wcOrder->get_billing_last_name(),
+                            'resource_key' => $this->senderGetResourceKey(),
+                            'phone' => $wcOrder->get_billing_phone(),
+                            'order_id' => (string)$orderId,
+                            'billing' => $billing,
+                            'shipping' => $shipping,
+                            'order_details' => $orderDetails,
+                            'store_id' => $storeId,
                     ];
 
                     if ($list) {
@@ -933,15 +1032,15 @@ class Sender_Carts
                     if ($this->sender->senderApi->senderConvertCart($cart->id, $cartData)) {
                         $cart->cart_status = Sender_Helper::CONVERTED_CART;
                         $cart->save();
-                        do_action('sender_get_customer_data', $cartData['email'], true);
+                        do_action('sender_update_customer_data', $cartData['email'], true);
                     }
                     return;
                 case Sender_Helper::ORDER_COMPLETED || Sender_Helper::ORDER_PENDING_PAYMENT:
                     $cartStatus = [
-                        "external_id" => $cart->id,
-                        'order_id' => (string)$orderId,
-                        'cart_status' => $newOrderStatus,
-                        'resource_key' => $this->senderGetResourceKey(),
+                            "external_id" => $cart->id,
+                            'order_id' => (string)$orderId,
+                            'cart_status' => $newOrderStatus,
+                            'resource_key' => $this->senderGetResourceKey(),
                     ];
 
                     $this->sender->senderApi->senderUpdateCartStatus($cart->id, $cartStatus);
@@ -967,9 +1066,9 @@ class Sender_Carts
 
                 if (isset($status)) {
                     update_user_meta(
-                        $userId,
-                        Sender_Helper::EMAIL_MARKETING_META_KEY,
-                        Sender_Helper::generateEmailMarketingConsent($status)
+                            $userId,
+                            Sender_Helper::EMAIL_MARKETING_META_KEY,
+                            Sender_Helper::generateEmailMarketingConsent($status)
                     );
                 }
             }
@@ -1002,15 +1101,15 @@ class Sender_Carts
 
         foreach ($cartData as $product) {
             $wooCart->add_to_cart(
-                (int)$product['product_id'],
-                (int)$product['quantity'],
-                (int)$product['variation_id'],
-                $product['variation']
+                    (int)$product['product_id'],
+                    (int)$product['quantity'],
+                    (int)$product['variation_id'],
+                    $product['variation']
             );
         }
 
         if (is_user_logged_in()){
-            set_transient(Sender_Helper::TRANSIENT_RECOVER_CART, '1', 5);
+            set_transient(Sender_Helper::TRANSIENT_RECOVER_CART, '1', 15);
         }
 
         setcookie('sender_recovered_cart', $cartId, time() + 3600, COOKIEPATH, COOKIE_DOMAIN);
@@ -1040,10 +1139,10 @@ class Sender_Carts
         }
 
         wp_enqueue_script(
-            'subscribe-newsletter-block',
-            plugins_url('js/subscribe-newsletter.block.js', __FILE__),
-            ['wp-blocks', 'wp-i18n', 'wp-element'],
-            filemtime(plugin_dir_path(__FILE__) . 'js/subscribe-newsletter.block.js')
+                'subscribe-newsletter-block',
+                plugins_url('js/subscribe-newsletter.block.js', __FILE__),
+                ['wp-blocks', 'wp-i18n', 'wp-element'],
+                filemtime(plugin_dir_path(__FILE__) . 'js/subscribe-newsletter.block.js')
         );
 
         $checkBoxActive = false;
@@ -1052,14 +1151,16 @@ class Sender_Carts
         }
 
         wp_localize_script(
-            'subscribe-newsletter-block',
-            'senderNewsletter',
-            [
-                'storeId' => $storeId,
-                'senderCheckbox' => $this->senderSubscribeNewsletterText(),
-                'senderAjax' => admin_url('admin-ajax.php'),
-                'checkboxActive' => $checkBoxActive ?: false,
-            ]
+                'subscribe-newsletter-block',
+                'senderNewsletter',
+                [
+                        'storeId' => $storeId,
+                        'senderCheckbox' => $this->senderSubscribeNewsletterText(),
+                        'senderAjax' => [
+                                'ajaxUrl' => admin_url('admin-ajax.php'),
+                        ],
+                        'checkboxActive' => $checkBoxActive ?: false,
+                ]
         );
     }
 
@@ -1137,6 +1238,49 @@ class Sender_Carts
             $this->senderConvertCartFallback($order_id);
             set_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id, -1, 3600);
         }
+    }
+
+    /**
+     * Inject convertCart script on order-received pages (e.g., Braintree redirect)
+     */
+    public function senderInjectThankYouScript($template)
+    {
+        if (!function_exists('is_order_received_page') || !is_order_received_page()) {
+            return $template;
+        }
+
+        global $wp;
+        $order_id = absint($wp->query_vars['order-received'] ?? 0);
+        if (!$order_id) {
+            return $template;
+        }
+
+        // Avoid duplicate injection
+        if (get_transient('sender_thankyou_script_' . $order_id)) {
+            return $template;
+        }
+
+        $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
+        if (empty($cartData)) {
+            $this->senderConvertCart($order_id);
+            $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
+            if (empty($cartData)) {
+                return $template;
+            }
+        }
+
+        // Mark as injected
+        set_transient('sender_thankyou_script_' . $order_id, 1, 600);
+
+        add_action('wp_footer', function() use ($order_id) {
+            echo $this->addConvertCartScript($order_id);
+        }, 5);
+
+        if (!wp_next_scheduled('sender_check_thankyou_seen', [$order_id])) {
+            wp_schedule_single_event(time() + 300, 'sender_check_thankyou_seen', [$order_id]);
+        }
+
+        return $template;
     }
 
 }

@@ -9,7 +9,6 @@ require_once plugin_dir_path(__FILE__) . 'Sender_Helper.php';
 class Sender_WooCommerce
 {
     private $sender;
-    private $tablePrefix;
     private $logFilePath;
 
     public function __construct($sender, $update = false)
@@ -28,7 +27,8 @@ class Sender_WooCommerce
         add_action('sender_schedule_sync_cron_job', [$this, 'scheduleSenderExportShopDataCronJob']);
 
         //Get order counts data
-        add_action('sender_get_customer_data', [$this, 'senderGetCustomerData'], 10, 2);
+        add_action('sender_get_customer_data', [$this, 'senderBuildOrdersMetaFields'], 10, 2);
+        add_action('sender_update_customer_data', [$this, 'senderUpdateCustomerData']);
         add_action('sender_update_customer_background', [$this, 'senderUpdateCustomerBackground'], 10, 2);
 
         $this->logFilePath = plugin_dir_path(__FILE__) . '../export-log.txt';
@@ -38,7 +38,7 @@ class Sender_WooCommerce
                 add_action('edit_user_profile', [$this, 'senderNewsletter']);
             }
             //From wp edit users admin side
-            add_action('edit_user_profile_update', [$this, 'senderUpdateCustomerData'], 10, 1);
+            add_action('edit_user_profile_update', [$this, 'senderUpdateCustomerDataAdminPanel'], 10, 1);
 
             //From woocommerce admin side
             add_action('woocommerce_process_shop_order_meta', [$this, 'senderAddUserAfterManualOrderCreation'], 51);
@@ -74,7 +74,56 @@ class Sender_WooCommerce
     {
         $this->logExportDebugInfo('Start', "Sender export data started");
 
-        $this->getTablePrefix();
+        $retryKey = 'sender_export_retry_count';
+        $retry = (int) get_transient($retryKey);
+
+        if (
+                !class_exists('WooCommerce') ||
+                !did_action('woocommerce_init') ||
+                !post_type_exists('shop_order')
+        ) {
+            if ($retry >= 3) {
+                $this->logExportDebugInfo(
+                        'Env',
+                        'WooCommerce not ready after 3 retries — aborting export'
+                );
+
+                delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
+                delete_transient($retryKey);
+                return;
+            }
+
+            set_transient($retryKey, $retry + 1, 5 * MINUTE_IN_SECONDS);
+
+            $this->logExportDebugInfo(
+                    'Env',
+                    'WooCommerce not ready in cron — retry ' . ($retry + 1)
+            );
+
+            wp_schedule_single_event(time() + 30, 'sender_export_shop_data_cron');
+            return;
+        }
+
+        delete_transient($retryKey);
+
+        global $wpdb;
+
+        $this->logExportDebugInfo('Env', 'wpdb->prefix: ' . $wpdb->prefix);
+        $this->logExportDebugInfo('Env', 'wpdb->posts: ' . $wpdb->posts);
+        $this->logExportDebugInfo('Env', 'wpdb->postmeta: ' . $wpdb->postmeta);
+
+        $sanityOrders = $wpdb->get_var(
+                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order'"
+        );
+        $sanityProducts = $wpdb->get_var(
+                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='product'"
+        );
+
+        $this->logExportDebugInfo(
+                'Sanity',
+                "Orders in wpdb->posts: $sanityOrders | Products in wpdb->posts: $sanityProducts"
+        );
+
         $this->exportCustomers();
         $this->exportProducts();
         $this->exportOrders();
@@ -131,17 +180,17 @@ class Sender_WooCommerce
         <?php
     }
 
-    public function senderUpdateCustomerData($userId)
+    public function senderUpdateCustomerDataAdminPanel($userId)
     {
-        $changedFields = [];
+        $changedData = [];
         if (isset($_POST['sender_newsletter'])) {
             update_user_meta(
                 $userId,
                 Sender_Helper::EMAIL_MARKETING_META_KEY,
                 Sender_Helper::generateEmailMarketingConsent(Sender_Helper::SUBSCRIBED)
             );
-            $changedFields['subscriber_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
-            $changedFields['sms_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
+            $changedData['subscriber_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
+            $changedData['sms_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
         } else {
             if (Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
                 update_user_meta(
@@ -149,8 +198,8 @@ class Sender_WooCommerce
                     Sender_Helper::EMAIL_MARKETING_META_KEY,
                     Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
                 );
-                $changedFields['subscriber_status'] = Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED;
-                $changedFields['sms_status'] = Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED;
+                $changedData['subscriber_status'] = Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED;
+                $changedData['sms_status'] = Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED;
             }
         }
 
@@ -163,11 +212,11 @@ class Sender_WooCommerce
         $updatedLastName = $_POST['last_name'] ?: $_POST['billing_last_name'] ?: '';
 
         if ($oldFirstname !== $updatedFirstName) {
-            $changedFields['firstname'] = $updatedFirstName;
+            $changedData['firstname'] = $updatedFirstName;
         }
 
         if ($oldLastName !== $updatedLastName) {
-            $changedFields['lastname'] = $updatedLastName;
+            $changedData['lastname'] = $updatedLastName;
         }
 
         $oldUserMetaData = get_user_meta($userId);
@@ -176,12 +225,19 @@ class Sender_WooCommerce
             $updatedPhone = $_POST['billing_phone'] ?: '';
 
             if ($oldPhone !== $updatedPhone){
-                $changedFields['phone'] = $updatedPhone;
+                $changedData['phone'] = $updatedPhone;
             }
         }
 
+        $email = get_userdata($userId)->user_email;
+
+        $ordersDataFields = $this->senderBuildOrdersMetaFields($email);
+        if (!empty($ordersDataFields)){
+            $changedData['fields'] = $ordersDataFields;
+        }
+
         if (!empty($changedFields)) {
-            $this->sender->senderApi->updateCustomer($changedFields, get_userdata($userId)->user_email);
+            $this->sender->senderApi->updateCustomer($changedData, get_userdata($userId)->user_email);
         }
     }
 
@@ -220,8 +276,8 @@ class Sender_WooCommerce
             $subscriberData = array_merge($subscriberData, $channelStatusData);
 
             $this->sender->senderApi->updateCustomer($subscriberData, $email);
-            $emailMarketingConset = get_post_meta($orderId, Sender_Helper::EMAIL_MARKETING_META_KEY, true);
-            if (empty($emailMarketingConset)) {
+            $emailMarketingConsent = get_post_meta($orderId, Sender_Helper::EMAIL_MARKETING_META_KEY, true);
+            if (empty($emailMarketingConsent)) {
                 $this->updateEmailMarketingConsent($email, $orderId);
             }
         } else {
@@ -360,10 +416,27 @@ class Sender_WooCommerce
             }
         }
 
-        if ($product->is_type('grouped')) {
-            $pPriceHtml = $product->get_price_html();
-            preg_match_all('/[\d,]+/', $pPriceHtml, $matches);
-            $pPrice = implode(' - ', $matches[0]);
+        if ($product->is_type('grouped') || $product->is_type('variable')) {
+            $children = $product->get_children();
+            $prices = [];
+
+            foreach ($children as $child_id) {
+                $child = wc_get_product($child_id);
+                if ($child) {
+                    $price = (float) $child->get_price();
+                    if ($price > 0) {
+                        $prices[] = $price;
+                    }
+                }
+            }
+
+            if (!empty($prices)) {
+                $min_price = min($prices);
+                $max_price = max($prices);
+                $pPrice = $min_price === $max_price ? (float)$min_price : "{$min_price} - {$max_price}";
+            } else {
+                $pPrice = 0;
+            }
         } else {
             $pPrice = (float) $product->get_regular_price();
         }
@@ -381,8 +454,12 @@ class Sender_WooCommerce
         $pDiscount = 0;
 
         if ($pOnSale && !empty($product->get_sale_price())) {
-            $pSalePrice = $product->get_sale_price();
-            $pDiscount = round((string)100 - ($pSalePrice / $pPrice * 100));
+            $pSalePrice = (float)$product->get_sale_price();
+            if ($pPrice > 0) {
+                $pDiscount = round(100 - ($pSalePrice / $pPrice * 100));
+            } else {
+                $pDiscount = 0;
+            }
         }
 
         $jsonData = [
@@ -420,14 +497,13 @@ class Sender_WooCommerce
                 pm4.meta_value AS email,
                 pm5.meta_value AS newsletter,
                 pm6.meta_value AS email_marketing_consent
-            FROM
-                " . $this->tablePrefix . "posts AS o
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
+            FROM {$wpdb->posts} AS o
+                LEFT JOIN {$wpdb->postmeta} AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
+                LEFT JOIN {$wpdb->postmeta} AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
+                LEFT JOIN {$wpdb->postmeta} AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
+                LEFT JOIN {$wpdb->postmeta} AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
+                LEFT JOIN {$wpdb->postmeta} AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
+                LEFT JOIN {$wpdb->postmeta} AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
             WHERE
                 o.post_type = 'shop_order'
                 AND o.post_status IN ('wc-completed', 'wc-on-hold')
@@ -448,14 +524,13 @@ class Sender_WooCommerce
                 pm4.meta_value AS email,
                 pm5.meta_value AS newsletter,
                 pm6.meta_value AS email_marketing_consent
-            FROM
-                " . $this->tablePrefix . "posts AS o
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
-                LEFT JOIN " . $this->tablePrefix . "postmeta AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
+            FROM {$wpdb->posts} AS o
+                LEFT JOIN {$wpdb->postmeta} AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
+                LEFT JOIN {$wpdb->postmeta} AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
+                LEFT JOIN {$wpdb->postmeta} AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
+                LEFT JOIN {$wpdb->postmeta} AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
+                LEFT JOIN {$wpdb->postmeta} AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
+                LEFT JOIN {$wpdb->postmeta} AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
             WHERE
                 o.post_type = 'shop_order'
                 AND o.post_status NOT IN ('wc-completed', 'wc-on-hold')
@@ -472,9 +547,8 @@ class Sender_WooCommerce
 
         #Extract customers which completed order
         $totalCompleted = $wpdb->get_var("SELECT COUNT(DISTINCT pm.meta_value)
-        FROM
-            " . $this->tablePrefix . "posts AS o
-            LEFT JOIN " . $this->tablePrefix . "postmeta AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
+        FROM {$wpdb->posts} AS o
+            LEFT JOIN {$wpdb->postmeta} AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
         WHERE
             o.post_type = 'shop_order'
             AND o.post_status IN ('wc-completed', 'wc-on-hold', 'wc-processing')
@@ -501,9 +575,8 @@ class Sender_WooCommerce
 
         #Extract customers which did not complete order
         $totalNotCompleted = $wpdb->get_var("SELECT COUNT(DISTINCT pm.meta_value)
-        FROM
-            " . $this->tablePrefix . "posts AS o
-            LEFT JOIN " . $this->tablePrefix . "postmeta AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
+        FROM {$wpdb->posts} AS o
+            LEFT JOIN {$wpdb->postmeta} AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
         WHERE
             o.post_type = 'shop_order'
             AND o.post_status NOT IN ('wc-completed', 'wc-on-hold', 'wc-processing')
@@ -591,7 +664,7 @@ class Sender_WooCommerce
             }
 
             $this->checkRateLimitation();
-            $customFields = $this->senderGetCustomerData($customer['email']);
+            $customFields = $this->senderBuildOrdersMetaFields($customer['email']);
             if (!empty($customFields)) {
                 $customer['fields'] = $customFields;
             }
@@ -602,65 +675,88 @@ class Sender_WooCommerce
         $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
     }
 
-    public function senderGetCustomerData($email, $update = false)
+    public function senderUpdateCustomerData($email): bool
     {
         if (empty($email)) {
-            return;
+            return false;
+        }
+
+        //Build orders + totals + last order
+        $customerData = $this->senderBuildOrdersMetaFields($email);
+
+        //not a customer exit
+        if (empty($customerData)) {
+            return false;
+        }
+
+        $payload = ['fields' => $customerData];
+
+        $listId = get_option('sender_customers_list');
+        if (!empty($listId)) {
+            $payload['tags'] = [$listId];
+        }
+
+        if (function_exists('as_enqueue_async_action')) {
+            as_enqueue_async_action(
+                    'sender_update_customer_background',
+                    [$email, $payload]
+            );
+            return true;
+        }
+
+        // Direct update
+        $this->sender->senderApi->updateCustomer($payload, $email);
+        return true;
+    }
+
+    public function senderBuildOrdersMetaFields($email): array
+    {
+        if (empty($email)) {
+            return [];
         }
 
         global $wpdb;
         $orders = $wpdb->get_col(
-            $wpdb->prepare(
-                "SELECT DISTINCT pm.post_id
+                $wpdb->prepare(
+                        "SELECT DISTINCT pm.post_id
         FROM {$wpdb->postmeta} AS pm
         WHERE pm.meta_key = '_billing_email'
         AND pm.meta_value = %s",
-                $email
-            )
+                        $email
+                )
         );
 
-        $totalSpent = 0.0;
         $ordersCount = count($orders);
-        if ($ordersCount > 0) {
-            foreach ($orders as $key => $orderId) {
-                $totalSpent += (float) get_post_meta($orderId, '_order_total', true);
-                $isLastIteration = ($key === ($ordersCount - 1));
-                if ($isLastIteration) {
-                    $last_order_name = '#' . $orderId;
-                    $last_order_currency = get_post_meta($orderId, '_order_currency', true);
-                }
+        if ($ordersCount === 0) {
+            return [];
+        }
+
+        $totalSpent = 0.0;
+        foreach ($orders as $key => $orderId) {
+            $totalSpent += (float) get_post_meta($orderId, '_order_total', true);
+
+            if ($key === $ordersCount - 1) {
+                $last_order_name     = '#' . $orderId;
+                $last_order_currency = get_post_meta($orderId, '_order_currency', true);
             }
-            $ordersData = [
-                'orders_count' => $ordersCount,
-                'total_spent' => $totalSpent,
+        }
+
+        return [
+                'orders_count'      => $ordersCount,
+                'total_spent'       => $totalSpent,
                 'last_order_number' => $last_order_name,
-                'currency' => $last_order_currency,
-            ];
-        }
-
-        if ($update && isset($ordersData)) {
-            if (function_exists('as_enqueue_async_action')) {
-                as_enqueue_async_action(
-                        'sender_update_customer_background',
-                        [$email, $ordersData]
-                );
-            } else {
-                $this->sender->senderApi->updateCustomer(['fields' => $ordersData], $email);
-            }
-
-            return true;
-        }
-
-        if (isset($ordersData)) {
-            return $ordersData;
-        }
+                'currency'          => $last_order_currency,
+        ];
     }
 
     public function sendUsersToSender($customers)
     {
         $customersExportData = [];
+        $autoSubscribeEnabled = get_option('sender_subscribe_label');
+
         foreach ($customers as $customerId) {
             $customer = get_user_meta($customerId);
+
             if (!empty($customer['billing_email'][0])) {
                 $email = $customer['billing_email'][0];
             } elseif (!empty(get_userdata($customerId)->user_email)) {
@@ -669,32 +765,47 @@ class Sender_WooCommerce
                 continue;
             }
 
+            $emailConsent = isset($customer[Sender_Helper::EMAIL_MARKETING_META_KEY][0])
+                    ? maybe_unserialize($customer[Sender_Helper::EMAIL_MARKETING_META_KEY][0])
+                    : [];
+
+            $isSubscribed = is_array($emailConsent)
+                    && isset($emailConsent['state'])
+                    && $emailConsent['state'] === Sender_Helper::SUBSCRIBED;
+
+            if (!$autoSubscribeEnabled && !$isSubscribed) {
+                continue;
+            }
+
             $data = [
-                'id' => $customerId,
-                'email' => $email,
-                'firstname' => $customer['first_name'][0] ?: null,
-                'lastname' => $customer['last_name'][0] ?: null,
-                'tags' => [get_option('sender_registration_list')],
+                    'id'        => $customerId,
+                    'email'     => $email,
+                    'firstname' => $customer['first_name'][0] ?? null,
+                    'lastname'  => $customer['last_name'][0] ?? null,
             ];
 
-            if (isset($customer['billing_phone'][0])) {
+            $mappingEnabled = get_option('sender_enable_role_group_mapping');
+            if ($mappingEnabled) {
+                $list = $this->getSenderListForUser($customerId);
+                if (!empty($list)) {
+                    $data['tags'] = [$list];
+                }
+            } else {
+                $data['tags'] = [get_option('sender_registration_list')];
+            }
+
+            if (!empty($customer['billing_phone'][0])) {
                 $data['phone'] = $customer['billing_phone'][0];
             }
 
-            if (isset($customer['newsletter'])) {
-                $customer['newsletter'] = (bool)$customer['newsletter'];
-            } else {
-                //Removing null values
-                unset($customer['newsletter']);
-            }
+            $data['newsletter'] = $isSubscribed;
 
-            //Adding email_marketing_consent if present
-            if (isset($customer[Sender_Helper::EMAIL_MARKETING_META_KEY][0])) {
-                $data[Sender_Helper::EMAIL_MARKETING_META_KEY] = unserialize($customer[Sender_Helper::EMAIL_MARKETING_META_KEY][0]);
+            if (!empty($emailConsent)) {
+                $data[Sender_Helper::EMAIL_MARKETING_META_KEY] = $emailConsent;
             }
 
             $this->checkRateLimitation();
-            $customFields = $this->senderGetCustomerData($email);
+            $customFields = $this->senderBuildOrdersMetaFields($email);
             if (!empty($customFields)) {
                 $data['fields'] = $customFields;
             }
@@ -702,18 +813,23 @@ class Sender_WooCommerce
             $customersExportData[] = $data;
         }
 
-        $this->checkRateLimitation();
-        $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
+        if (!empty($customersExportData)) {
+            $this->checkRateLimitation();
+            $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
+        }
     }
 
     public function exportProducts()
     {
         try {
             global $wpdb;
-            $productsCount = (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . $this->tablePrefix . 'posts 
-                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup 
-                          ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
-                      WHERE post_type = "product"');
+            $productsCount = (int) $wpdb->get_var(
+                    "SELECT COUNT(*)
+                 FROM {$wpdb->posts}
+                 INNER JOIN {$wpdb->wc_product_meta_lookup}
+                     ON {$wpdb->wc_product_meta_lookup}.product_id = {$wpdb->posts}.ID
+                 WHERE post_type = 'product'"
+            );
 
             if ($wpdb->last_error) {
                 $this->logExportDebugInfo('DB Error', $wpdb->last_error);
@@ -729,12 +845,16 @@ class Sender_WooCommerce
 
             for ($x = 0; $x < $loopTimes; $x++) {
                 $productExportData = [];
-                $products = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'posts 
-                      INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup 
-                          ON ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'posts.id
-                      WHERE post_type = "product"
-                      ORDER BY ' . $this->tablePrefix . 'posts.ID ASC LIMIT ' . $chunkSize . '
-             OFFSET ' . $productsExported);
+                $products = $wpdb->get_results(
+                        "SELECT *
+                         FROM {$wpdb->posts}
+                         INNER JOIN {$wpdb->wc_product_meta_lookup}
+                             ON {$wpdb->wc_product_meta_lookup}.product_id = {$wpdb->posts}.ID
+                         WHERE post_type = 'product'
+                         ORDER BY {$wpdb->posts}.ID ASC
+                         LIMIT {$chunkSize}
+                         OFFSET {$productsExported}"
+                );
 
                 if ($wpdb->last_error) {
                     $this->logExportDebugInfo('DB Error', $wpdb->last_error);
@@ -809,7 +929,10 @@ class Sender_WooCommerce
     {
         global $wpdb;
         $totalOrders = $wpdb->get_var(
-            'SELECT COUNT(*) FROM ' . $this->tablePrefix . 'posts WHERE post_type = "shop_order" AND post_status != "trash" AND post_status != "auto-draft"'
+                "SELECT COUNT(*)
+             FROM {$wpdb->posts}
+             WHERE post_type = 'shop_order'
+               AND post_status NOT IN ('trash', 'auto-draft')"
         );
 
         $this->logExportDebugInfo('ExportOrders', "Total orders: $totalOrders");
@@ -822,7 +945,7 @@ class Sender_WooCommerce
 
         foreach ($statuses as $status) {
             $count = $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$this->tablePrefix}posts WHERE post_type = 'shop_order' AND post_status = %s", $status
+                    "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'shop_order' AND post_status = %s", $status
             ));
             $this->logExportDebugInfo('Order Status Count', "$status = $count");
         }
@@ -834,7 +957,13 @@ class Sender_WooCommerce
         for ($x = 0; $x <= $loopTimes; $x++) {
             $ordersExportData = [];
             $chunkedOrders = $wpdb->get_results(
-                'SELECT * FROM ' . $this->tablePrefix . 'posts WHERE post_type = "shop_order" AND post_status != "trash" AND post_status != "auto-draft" LIMIT ' . $chunkSize . ' OFFSET ' . $ordersExported);
+                    "SELECT *
+                     FROM {$wpdb->posts}
+                     WHERE post_type = 'shop_order'
+                       AND post_status NOT IN ('trash', 'auto-draft')
+                     LIMIT {$chunkSize}
+                     OFFSET {$ordersExported}"
+            );
 
             $this->logExportDebugInfo('Export Chunk', "Offset: $ordersExported | Orders Fetched: " . count($chunkedOrders));
 
@@ -866,7 +995,7 @@ class Sender_WooCommerce
                         'remoteId' => $remoteId,
                         'name' => $order->post_name,
                         'currency' => get_woocommerce_currency(),
-                        'orderId' => $order->ID,
+                        'orderId' => $wcOrder ? (string) $wcOrder->get_order_number() : '',
                         'email' => get_post_meta($order->ID, '_billing_email', true),
                         'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
                         'lastname' => get_post_meta($order->ID, '_billing_last_name', true),
@@ -881,6 +1010,17 @@ class Sender_WooCommerce
                     $orderData['phone'] = $billingPhoneNormalized;
                 }
 
+                $paymentMethod       = get_post_meta($order->ID, '_payment_method', true);
+                $paymentMethodTitle  = get_post_meta($order->ID, '_payment_method_title', true);
+
+                $orderData['order_details'] = [
+                        'total'     => number_format((float) $wcOrder->get_total(), 2),
+                        'subtotal'  => number_format((float) $wcOrder->get_subtotal(), 2),
+                        'discount'  => number_format((float) $wcOrder->get_discount_total(), 2),
+                        'tax'       => number_format((float) $wcOrder->get_total_tax(), 2),
+                        'order_date'=> $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
+                ];
+
                 $billing = [
                         'first_name' => get_post_meta($order->ID, '_billing_first_name', true),
                         'last_name'  => get_post_meta($order->ID, '_billing_last_name', true),
@@ -893,6 +1033,8 @@ class Sender_WooCommerce
                         'country'    => $billingCountry,
                         'email'      => get_post_meta($order->ID, '_billing_email', true),
                         'phone'      => $billingPhoneNormalized,
+                        'payment_method' => $paymentMethod,
+                        'payment_method_title' => $paymentMethodTitle,
                 ];
 
                 $orderData['billing'] = array_filter($billing, function ($v) {
@@ -922,33 +1064,77 @@ class Sender_WooCommerce
                     $orderData['shipping']['customer_ip'] = $customerIp;
                 }
 
-                $productsData = $wpdb->get_results('SELECT * FROM ' . $this->tablePrefix . 'wc_order_product_lookup
-            INNER JOIN ' . $this->tablePrefix . 'wc_product_meta_lookup on ' . $this->tablePrefix . 'wc_product_meta_lookup.product_id = ' . $this->tablePrefix . 'wc_order_product_lookup.product_id
-            LEFT JOIN ' . $this->tablePrefix . 'posts on ' . $this->tablePrefix . 'posts.id = ' . $this->tablePrefix . 'wc_order_product_lookup.product_id
-            where ' . $this->tablePrefix . 'wc_order_product_lookup.order_id = ' . $order->ID);
+                $orderProductTable = $wpdb->prefix . 'wc_order_product_lookup';
+
+                $productsData = $wpdb->get_results(
+                        $wpdb->prepare(
+                                "SELECT *
+                                 FROM {$orderProductTable}
+                                 WHERE order_id = %d",
+                                $order->ID
+                        )
+                );
 
                 $orderData['products'] = [];
                 $orderPrice = 0;
                 foreach ($productsData as $key => $product) {
-                    $regularPrice = $product->min_price;
-                    $salePrice = $product->max_price;
+                    $wcProduct = wc_get_product($product->variation_id ?: $product->product_id);
 
-                    if ($regularPrice <= 0) {
-                        $regularPrice = 1;
+                    if ($wcProduct) {
+                        $regularPrice = (float) $wcProduct->get_regular_price();
+                        $salePrice = (float) $wcProduct->get_sale_price();
+
+                        $price = $salePrice > 0 ? $salePrice : $regularPrice;
+                        $discount = 0;
+                        $oldPrice = null;
+
+                        if ($salePrice > 0 && $salePrice < $regularPrice) {
+                            $discount = round(100 - ($salePrice / $regularPrice * 100));
+                            $oldPrice = $regularPrice;
+                        }
+
+                        $orderPrice += $price * $product->product_qty;
+
+                        $sku = $wcProduct->get_sku();
+
+                        if (!$sku && $wcProduct->is_type('variation')) {
+                            $parent = wc_get_product($wcProduct->get_parent_id());
+                            if ($parent) {
+                                $sku = $parent->get_sku();
+                            }
+                        }
+
+                        $productData = [
+                                'product_id' => $wcProduct->get_id(),
+                                'sku' => $sku ?: null,
+                                'name' => $wcProduct->get_name(),
+                                'price' => (string) $price,
+                                'qty' => $product->product_qty,
+                                'currency' => get_woocommerce_currency(),
+                                'image' => get_the_post_thumbnail_url($product->product_id),
+                        ];
+
+                        if ($oldPrice !== null) {
+                            $productData['old_price'] = (string) $oldPrice;
+                            $productData['discount']  = (string) $discount;
+                        }
+
+                        $orderData['products'][$key] = $productData;
+
+                    } else {
+                        $orderData['products'][$key] = [
+                                'product_id' => $product->ID,
+                                'sku' => $product->sku,
+                                'name' => $product->post_title,
+                                'price' => $product->max_price,
+                                'qty' => $product->product_qty,
+                                'discount' => '0',
+                                'currency' => get_woocommerce_currency(),
+                                'image' => get_the_post_thumbnail_url($product->product_id),
+                        ];
+
+                        $orderPrice += $product->max_price * $product->product_qty;
                     }
-
-                    $discount = round(100 - ($salePrice / $regularPrice * 100));
-                    $orderPrice += $product->max_price * $product->product_qty;
-                    $orderData['products'][$key] = [
-                            'product_id' => $product->ID,
-                            'sku' => $product->sku,
-                            'name' => $product->post_title,
-                            'price' => $product->max_price,
-                            'qty' => $product->product_qty,
-                            'discount' => (string)$discount,
-                            'currency' => get_woocommerce_currency(),
-                            'image' => get_the_post_thumbnail_url($product->product_id),
-                    ];
                 }
 
                 $orderData['price'] = $orderPrice;
@@ -959,12 +1145,6 @@ class Sender_WooCommerce
             $this->sender->senderApi->senderExportData(['orders' => $ordersExportData]);
             $ordersExported += $chunkSize;
         }
-    }
-
-    public function getTablePrefix()
-    {
-        global $wpdb;
-        $this->tablePrefix = $wpdb->prefix;
     }
 
     public function senderProcessOrderFromWoocommerceDashboard($orderId, $senderUser)
@@ -1032,24 +1212,31 @@ class Sender_WooCommerce
 
         foreach ($items as $item => $values) {
             $_product = wc_get_product($values->get_product_id());
-            $regularPrice = (int) get_post_meta($values->get_product_id(), '_regular_price', true);
-            $salePrice = (int) get_post_meta($values->get_product_id(), '_sale_price', true);
+            $regularPrice = (float) $_product->get_regular_price();
+            $salePrice    = (float) $_product->get_sale_price();
 
-            if ($regularPrice <= 0) {
-                $regularPrice = 1;
+            $price     = $salePrice > 0 ? $salePrice : $regularPrice;
+            $discount  = 0;
+            $oldPrice  = null;
+
+            if ($salePrice > 0 && $salePrice < $regularPrice) {
+                $discount = round(100 - ($salePrice / $regularPrice * 100));
+                $oldPrice = $regularPrice;
             }
 
-            $discount = round(100 - ($salePrice / $regularPrice * 100));
-
             $prod = [
-                'sku' => (string) $_product->get_sku(),
-                'name' => (string) $_product->get_title(),
-                'price' => (string) $regularPrice,
-                'discount' => (string) $discount,
-                'qty' => $values->get_quantity(),
-                'image' => get_the_post_thumbnail_url($values->get_product_id()),
-                'product_id' => $values->get_product_id()
+                    'sku' => (string) $_product->get_sku(),
+                    'name' => (string) $_product->get_title(),
+                    'price'       => (string) $price,
+                    'qty'         => (int) $values->get_quantity(),
+                    'image'       => get_the_post_thumbnail_url($values->get_product_id()),
+                    'product_id'  => $values->get_product_id(),
             ];
+
+            if ($oldPrice !== null) {
+                $prod['old_price'] = (string) $oldPrice;
+                $prod['discount']  = (string) $discount;
+            }
 
             $data['products'][] = $prod;
         }
@@ -1155,13 +1342,44 @@ class Sender_WooCommerce
         }
     }
 
-    public function senderUpdateCustomerBackground($email, $fields)
+    public function senderUpdateCustomerBackground($email, $updateData)
     {
-        if (empty($email) || empty($fields)) {
+        if (empty($email) || empty($updateData)) {
             return;
         }
 
-        $this->sender->senderApi->updateCustomer(['fields' => $fields], $email);
+        $this->sender->senderApi->updateCustomer($updateData, $email);
+    }
+
+    private function getSenderListForUser($userId)
+    {
+        $list = '';
+        $mappingEnabled = get_option('sender_enable_role_group_mapping');
+        $map = (array) get_option('sender_role_group_map') ?: [];
+
+        $user = get_userdata($userId);
+        if (!$user) {
+            return get_option('sender_registration_list');
+        }
+
+        $roles = (array) ($user->roles ?? []);
+
+        if ($mappingEnabled) {
+            foreach ($roles as $r) {
+                if (!empty($map[$r])) {
+                    $list = trim($map[$r]);
+                    break;
+                }
+            }
+
+            if (empty($list)) {
+                $list = get_option('sender_registration_list');
+            }
+        } else {
+            $list = get_option('sender_registration_list');
+        }
+
+        return $list;
     }
 
 }

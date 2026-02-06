@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
-Tested up to: 6.8.2
+Tested up to: 6.9
 Requires PHP: 7.1
-Stable tag: 2.9.16
+Stable tag: 2.10.12
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -388,3 +388,40 @@ purchased
 * Handle exported products fix
 = 2.9.16 2025-09-26 =
 * Avoid recalculation of order on woo calls
+= 2.9.17 2025-10-08 =
+* Handle cart convert for off-site payments
+= 2.9.18 2025-10-09 =
+* User agent header allocated on sender calls
+= 2.9.19 2025-10-20 =
+* Handle providers callback on checkout
+= 2.9.20 2025-10-22 =
+* Handle pensopay callback methods
+= 2.10 2025-10-28 =
+* Feature add as registration a role associated with a group
+= 2.10.1 2025-11-02 =
+* Handle when no sale price on product
+= 2.10.2 2025-11-03 =
+* Handle division zero on products with zero value
+= 2.10.3 2025-11-11 =
+* Add check upon checkout
+= 2.10.4 2025-11-19 =
+* List customer addition upon order data fields refactor and fallback addition for convert cart situation
+* Debug file information of site and plugin options data
+= 2.10.5 2025-12-04 =
+* Fix method call on edit users customer data
+= 2.10.6 2025-12-15 =
+* Order details on sync with payment method
+= 2.10.7 2025-12-29 =
+* Sync log file fix
+= 2.10.8 2025-12-30 =
+* Use default wpdb for sync with sender situation
+= 2.10.9 2026-01-07 =
+* Minor change increase transient duration for login/registration/recover
+= 2.10.10 2026-01-16 =
+* Add sku on syncing orders fix
+= 2.10.11 2026-01-23 =
+* Handle js bug in subscribe newsletter and newsletter checkbox and statuses on update
+= 2.10.12 2026-01-27 =
+* Handle status on pre-checked newsletters for checkout and resume information of cart update
+
+

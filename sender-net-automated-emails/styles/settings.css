@@ -41,6 +41,7 @@
 
 .sender-d-flex {
     display: flex;
+    justify-content:space-between;
 }
 
 .sender-flex-dir-column {
@@ -177,9 +178,6 @@
     height: 100%;
 }
 
-.sender-settings-layout {
-    max-width: 500px;
-}
 
 .sender-settings-layout > div:first-child, .sender-settings-layout > div:nth-child(2) {
     margin-bottom: 30px;
@@ -200,6 +198,21 @@
     border: none;
 }
 
+#sender-add-role-group {
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+#sender-add-role-group:hover {
+    background-color: rgba(148, 177, 222, 0.59);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.sender-role-group-row, .sender-role-group-header{
+    gap:15px;
+}
+
+
 .sender-cta-button.sender-medium {
     padding: 12px 20px;
 }
@@ -219,7 +232,8 @@
 }
 
 .sender-form-label {
-    margin-bottom: 5px;
+    margin-top:10px;
+    margin-bottom: 10px;
 }
 
 input.sender-input, select.sender-woo-lists {
@@ -319,10 +333,10 @@ a.sender-link:hover {
     background: white;
 }
 
-.sender-box:not(.sender-api-key) {
+.sender-box:not(.sender-api-key), .sender-box:not(.sender-plugin-settings) {
     border: 1px solid #ddd;
     box-shadow: 0 0 4px 0 rgba(0, 0, 0, .1);
-    padding: 20px 20px 0;
+    padding: 40px;
 }
 
 select.sender-woo-lists:disabled {
@@ -337,6 +351,10 @@ select.sender-woo-lists:disabled {
     color: #000000;
     padding: 7px 32px 7px 12px;
     text-shadow: none;
+}
+.sender-options{
+    width:100%;
+    margin-bottom:30px;
 }
 
 .sender-options .sender-select-wrap .sender-woo-lists:not([disabled]):hover,
@@ -611,4 +629,120 @@ label.sender-checkbox-label {
 }
 #sender-sync-notice{
     margin: 0px 0px 20px!important;
+}
+.sender-note {
+    font-size: 14px;
+    color: #666;
+    margin-left: 10px;
+    display: inline-block;
+    vertical-align: middle;
+    max-width:85%;
+    text-align:justify;
+}
+
+.sender-wide-control{
+    max-width:85%;
+    margin-left: 10px;
+}
+
+.sender-disabled {
+    opacity: 0.6;
+}
+.sender-disabled select {
+    pointer-events: none;
+}
+
+/* =======================================
+   Two-column layout for settings boxes
+   ======================================= */
+@media (min-width: 1100px) {
+    /* Make the main settings area flexible */
+    .sender-settings-layout {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        max-width: 100%;
+    }
+
+    /* Make both boxes share space side by side */
+    .sender-plugin-settings {
+        flex: 1;
+        min-width: 48%;
+    }
+
+    /* Keep form height consistent within boxes */
+    .sender-plugin-settings form {
+        height: 100%;
+    }
+
+    /* Ensure the sync block stays full-width below */
+    .sender-settings-layout > .sender-flex-dir-column {
+        flex-basis: 100%;
+    }
+}
+
+/* =======================================
+   Dual box layout (WooCommerce + Newsletter)
+   ======================================= */
+.sender-dual-box-wrapper {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 30px;
+    margin-bottom: 30px;
+    padding:40px;
+}
+
+.sender-dual-box-wrapper .sender-plugin-settings {
+    flex: 1;
+    min-width: 48%;
+}
+
+.sender-flex-justify-start{
+    justify-content: flex-start;
+}
+
+/* Better spacing for subscription label input block */
+.sender-subscriber-label-input {
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* clean vertical space between label, input, note, and button */
+}
+
+.sender-subscriber-label-input label.sender-label {
+    margin-bottom: 4px;
+    font-weight: 500;
+    color: #222;
+}
+
+.sender-subscriber-label-input input.sender-text-input {
+    margin-bottom: 0;
+}
+
+.sender-subscriber-label-input .sender-note {
+    margin-left: 0;
+    margin-top: -2px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #555;
+}
+
+.sender-subscriber-label-input .sender-cta-button {
+    align-self: flex-start;
+    margin-top: 6px;
+}
+
+.sender-disabled-field {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+/* On small screens: stack them */
+@media (max-width: 1024px) {
+    .sender-dual-box-wrapper {
+        flex-direction: column;
+    }
+    .sender-dual-box-wrapper .sender-plugin-settings {
+        min-width: 100%;
+    }
 }

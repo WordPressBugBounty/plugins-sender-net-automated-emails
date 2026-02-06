@@ -9,24 +9,26 @@ require_once 'Sender_Helper.php';
 class Sender_Automated_Emails
 {
     private $availableSettings = [
-        'sender_api_key' => false,
-        'sender_resource_key' => false,
-        'sender_allow_tracking' => false,
-        'sender_account_message' => false,
-        'sender_customers_list' => 0,
-        'sender_registration_list' => 0,
-        'sender_store_register' => false,
-        'sender_account_disconnected' => false,
-        'sender_wocommerce_sync' => 0,
-        'sender_account_title' => false,
-        'sender_account_plan_type' => false,
-        'sender_groups_data' => false,
-        'sender_forms_data' => false,
-        'sender_synced_data_date' => false,
-        'sender_subscribe_label' => false,
-        'sender_subscribe_to_newsletter_string' => 'Register to our newsletter',
-        'sender_forms_data_last_update' => 0,
-        'sender_checkbox_newsletter_on_checkout' => false,
+            'sender_api_key' => false,
+            'sender_resource_key' => false,
+            'sender_allow_tracking' => false,
+            'sender_customers_list' => 0,
+            'sender_registration_list' => 0,
+            'sender_store_register' => false,
+            'sender_account_disconnected' => false,
+            'sender_wocommerce_sync' => 0,
+            'sender_account_title' => false,
+            'sender_account_plan_type' => false,
+            'sender_groups_data' => false,
+            'sender_forms_data' => false,
+            'sender_synced_data_date' => false,
+            'sender_subscribe_label' => false,
+            'sender_subscribe_to_newsletter_string' => 'Register to our newsletter',
+            'sender_forms_data_last_update' => 0,
+            'sender_checkbox_newsletter_on_checkout' => false,
+            'sender_enable_role_group_mapping' => false,
+            'sender_role_group_map' => [],
+            'sender_new_registration_auto_subscribe' => true,
     ];
 
     public $senderBaseFile;
@@ -43,7 +45,7 @@ class Sender_Automated_Emails
         $this->senderApi = new Sender_API();
 
         $this->senderSetupOptions()
-            ->senderAddFilters();
+                ->senderAddFilters();
 
         if (!class_exists('Sender_Repository')) {
             require_once("Sender_Repository.php");
@@ -60,6 +62,8 @@ class Sender_Automated_Emails
                 if (!class_exists('Sender_Repository')) {
                     require_once plugin_dir_path(__FILE__) . 'includes/Sender_Repository.php';
                 }
+
+                $this->runMaintenanceTask();
 
                 $success = (new Sender_Repository())->addSenderSubscriberId();
                 if ($success) {
@@ -226,7 +230,6 @@ class Sender_Automated_Emails
     public function checkApiKey()
     {
         if (!$this->senderApiKey()) {
-            update_option('sender_account_message', false);
             update_option('sender_resource_key', false);
             return false;
         }
@@ -241,7 +244,6 @@ class Sender_Automated_Emails
             update_option('sender_account_title', $user->account->title);
             update_option('sender_account_plan_type', $user->account->active_plan->type);
             update_option('sender_resource_key', $user->account->resource_key);
-            update_option('sender_account_message', false);
         }
 
         return true;
@@ -325,29 +327,45 @@ class Sender_Automated_Emails
 
     public function enqueueSenderWordpressJs()
     {
-        wp_enqueue_script(Sender_Helper::SENDER_JS_FILE_NAME, plugins_url('js/sender-wordpress-plugin.js', __FILE__), array(), '1.0', true);
+        wp_enqueue_script(Sender_Helper::SENDER_JS_FILE_NAME,
+                plugins_url('js/sender-wordpress-plugin.js', __FILE__),
+                array(),
+                filemtime(plugin_dir_path(__FILE__) . 'js/sender-wordpress-plugin.js'),
+                true
+        );
+
         wp_localize_script(Sender_Helper::SENDER_JS_FILE_NAME, 'senderAjax', array('ajaxUrl' => admin_url('admin-ajax.php')));
     }
 
     public function subscriberVisitorCreationRegister($userId)
     {
-        $this->senderApi->senderTrackRegisterUserCallback($userId);
-        add_action('sender_track_user_action', [Sender_Carts::class, 'trackUser']);
+        // Only subscribe users automatically if the admin enabled this
+        if (!get_option('sender_subscribe_label')) {
+            return;
+        }
 
-        set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 5);
+        $this->updateUserEmailMarketingConsentFromValue($userId, $_POST['sender_newsletter'] ?? 0);
+
+        set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 15);
     }
 
     public function subscriberVisitorCreationLogin($uname, $user)
     {
-        $this->senderApi->senderTrackRegisterUserCallback($user->ID);
-        add_action('sender_track_user_action', [Sender_Carts::class, 'trackUser']);
-        set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 5);
+        // Only subscribe users automatically if the admin enabled this
+        if (!get_option('sender_subscribe_label')) {
+            return;
+        }
+
+        $this->updateUserEmailMarketingConsentFromValue($user->ID, $_POST['sender_newsletter'] ?? 0);
+
+        set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 15);
     }
 
     public function outputSenderTrackVisitorsScript()
     {
         if (get_transient(Sender_Helper::TRANSIENT_LOG_IN)){
             if (is_user_logged_in()){
+                do_action('sender_track_user_action');
                 $current_user = wp_get_current_user();
                 $user_email = strtolower($current_user->user_email);
                 wp_localize_script(Sender_Helper::SENDER_JS_FILE_NAME, 'senderTrackVisitorData', array('email' => $user_email));
@@ -481,4 +499,48 @@ class Sender_Automated_Emails
 
         new Sender_Webhooks($this);
     }
+
+    public function getAvailableSettings()
+    {
+        return $this->availableSettings;
+    }
+
+    private function runMaintenanceTask(): void
+    {
+        if (!get_option('sender_maintenance_task_done')) {
+            //Fix legacy sender_allow_tracking value
+            if (get_option('sender_allow_tracking') === 'sender_allow_tracking') {
+                update_option('sender_allow_tracking', '1');
+            }
+
+            //Remove deprecated option sender_account_message
+            if (get_option('sender_account_message') !== false) {
+                delete_option('sender_account_message');
+            }
+
+            update_option('sender_maintenance_task_done', 1);
+        }
+    }
+
+    /**
+     * Update email marketing consent from a boolean-like value.
+     *
+     * @param int  $userId
+     * @param mixed $value  Expected: 1|0|'1'|'0'|true|false
+     */
+    public function updateUserEmailMarketingConsentFromValue(int $userId, $value): void
+    {
+        $isSubscribed = ((int) $value === 1);
+
+        $status = $isSubscribed ? Sender_Helper::SUBSCRIBED : Sender_Helper::UNSUBSCRIBED;
+
+        update_user_meta(
+                $userId,
+                Sender_Helper::EMAIL_MARKETING_META_KEY,
+                Sender_Helper::generateEmailMarketingConsent($status)
+        );
+    }
+
+
+
 }
