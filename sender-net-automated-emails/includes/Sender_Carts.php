@@ -74,8 +74,7 @@ class Sender_Carts
         add_action('wp_head', [$this, 'outputSenderTrackVisitorsScript']);
 
         if (is_admin()) {
-            add_action('woocommerce_order_status_changed', [$this, 'senderUpdateOrderStatus']);
-            add_action('sender_update_order_status',[$this, 'senderUpdateOrderStatus']);
+            add_action('woocommerce_order_status_changed', [$this, 'senderUpdateOrderStatus'], 10, 3);
         }
 
         return $this;
@@ -507,11 +506,6 @@ class Sender_Carts
             $items = $this->senderGetCart();
             $cartData = serialize($items);
 
-            if (!$this->senderGetWoo()->session->get_session_cookie()) {
-                if (empty($items)) { return; }
-                WC()->session->set_customer_session_cookie(true);
-            }
-
             $cart = null;
             $senderUser = null;
 
@@ -934,13 +928,19 @@ class Sender_Carts
     }
 
     //Use to convert carts which got confirmed payment
-    public function senderUpdateOrderStatus($orderId)
+    public function senderUpdateOrderStatus($orderId, $oldStatus = null, $newStatus = null)
     {
-        if (!isset($_POST['order_status'])) {
+        if ($newStatus !== null) {
+            $newOrderStatus = $newStatus;
+            if (strpos($newOrderStatus, 'wc-') !== 0) {
+                $newOrderStatus = 'wc-' . $newOrderStatus;
+            }
+        } elseif (isset($_POST['order_status'])) {
+            $newOrderStatus = $_POST['order_status'];
+        } else {
             return;
         }
 
-        $newOrderStatus = $_POST['order_status'];
         $senderRemoteCartId = get_post_meta($orderId, Sender_Helper::SENDER_CART_META, true);
 
         if (!empty($senderRemoteCartId)){
@@ -1035,7 +1035,8 @@ class Sender_Carts
                         do_action('sender_update_customer_data', $cartData['email'], true);
                     }
                     return;
-                case Sender_Helper::ORDER_COMPLETED || Sender_Helper::ORDER_PENDING_PAYMENT:
+                case Sender_Helper::ORDER_COMPLETED:
+                case Sender_Helper::ORDER_PENDING_PAYMENT:
                     $cartStatus = [
                             "external_id" => $cart->id,
                             'order_id' => (string)$orderId,

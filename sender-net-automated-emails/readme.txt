@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 6.9
 Requires PHP: 7.1
-Stable tag: 2.10.12
+Stable tag: 2.10.13
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -423,5 +423,8 @@ purchased
 * Handle js bug in subscribe newsletter and newsletter checkbox and statuses on update
 = 2.10.12 2026-01-27 =
 * Handle status on pre-checked newsletters for checkout and resume information of cart update
+= 2.10.13 2026-02-10 =
+* Handle order status changes on background plugins updates of orders
+* Avoid session cart tracking
 
 

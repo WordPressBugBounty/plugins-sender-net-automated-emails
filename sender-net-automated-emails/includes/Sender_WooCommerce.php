@@ -1245,10 +1245,6 @@ class Sender_WooCommerce
 
         #Add sender_remote_id in wp_post
         update_post_meta($orderId, Sender_Helper::SENDER_CART_META, $cart->id);
-
-        #Handle status of cart
-        do_action('sender_update_order_status', $orderId);
-
     }
 
     private function logExportDebugInfo($step, $data)
