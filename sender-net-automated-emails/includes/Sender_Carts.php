@@ -418,9 +418,12 @@ class Sender_Carts
             $description = Sender_Helper::getProductShortText($_product);
 
             if ($_product->is_type('variation')) {
-                $parent_id   = $_product->get_parent_id();
-                $parent      = wc_get_product( $parent_id );
-                $sku = $parent ? $parent->get_sku() : '';
+                $sku = $_product->get_sku();
+                if (!$sku) {
+                    $parent_id = $_product->get_parent_id();
+                    $parent = wc_get_product($parent_id);
+                    $sku = $parent ? $parent->get_sku() : '';
+                }
             } else {
                 $sku = $_product->get_sku();
             }

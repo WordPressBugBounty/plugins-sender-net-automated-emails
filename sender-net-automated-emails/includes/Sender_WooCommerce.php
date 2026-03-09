@@ -871,9 +871,11 @@ class Sender_WooCommerce
                     }
 
                     if ($wcProduct->is_type('variation')) {
-                        $parent_id = $wcProduct->get_parent_id();
-                        $parent    = wc_get_product($parent_id);
-                        $sku = $parent ? $parent->get_sku() : '';
+                        $sku = $wcProduct->get_sku();
+                        if (!$sku) {
+                            $parent = wc_get_product($wcProduct->get_parent_id());
+                            $sku = $parent ? $parent->get_sku() : '';
+                        }
                     } else {
                         $sku = $wcProduct->get_sku();
                     }
@@ -1211,7 +1213,10 @@ class Sender_WooCommerce
         ];
 
         foreach ($items as $item => $values) {
-            $_product = wc_get_product($values->get_product_id());
+            $variation_id = $values->get_variation_id();
+            $product_id   = $variation_id ?: $values->get_product_id();
+
+            $_product = wc_get_product($product_id);
             $regularPrice = (float) $_product->get_regular_price();
             $salePrice    = (float) $_product->get_sale_price();
 
