@@ -113,7 +113,7 @@ class Sender_Model
 		}
 
 		global $wpdb;
-		$sqlQuery = "UPDATE `{$this->getTableName()}`SET ";
+		$sqlQuery = "UPDATE `{$this->getTableName()}` SET ";
 		$changes = [];
 
 		foreach ($this->dirtyAttributes as $key => $change) {

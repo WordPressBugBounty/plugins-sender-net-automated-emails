@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 6.9
 Requires PHP: 7.1
-Stable tag: 2.10.14
+Stable tag: 2.10.15
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -428,5 +428,7 @@ purchased
 * Avoid session cart tracking
 = 2.10.14 2026-03-09 =
 * Handle variation product sku in sync customers and trackCart
+= 2.10.15 2026-03-16 =
+* Fix validaiton of queries from recent wp core updates
 
 
