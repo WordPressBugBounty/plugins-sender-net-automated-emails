@@ -99,7 +99,7 @@ class Sender_Carts
             update_user_meta($userId, 'email_marketing_consent', Sender_Helper::generateEmailMarketingConsent(Sender_Helper::SUBSCRIBED));
             $payload = ['subscriber_status' => Sender_Helper::UPDATE_STATUS_ACTIVE];
         } else {
-            if (Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
+            if (!Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
                 update_user_meta(
                         $userId,
                         Sender_Helper::EMAIL_MARKETING_META_KEY,
@@ -212,13 +212,13 @@ class Sender_Carts
         if (!empty($_POST['sender_newsletter'])) {
             update_post_meta($orderId, Sender_Helper::EMAIL_MARKETING_META_KEY, Sender_Helper::generateEmailMarketingConsent(Sender_Helper::SUBSCRIBED));
         } else {
-            if (Sender_Helper::shouldChangeChannelStatus($orderId, 'order')) {
+            if (!Sender_Helper::shouldChangeChannelStatus($orderId, 'order')) {
                 update_post_meta(
                         $orderId,
                         Sender_Helper::EMAIL_MARKETING_META_KEY,
                         Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
                 );
-            } elseif (is_user_logged_in() && Sender_Helper::shouldChangeChannelStatus(get_current_user_id(), 'user')) {
+            } elseif (is_user_logged_in() && !Sender_Helper::shouldChangeChannelStatus(get_current_user_id(), 'user')) {
                 update_user_meta(
                         get_current_user_id(),
                         Sender_Helper::EMAIL_MARKETING_META_KEY,

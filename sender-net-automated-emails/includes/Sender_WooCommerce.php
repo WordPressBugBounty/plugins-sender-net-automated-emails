@@ -192,7 +192,7 @@ class Sender_WooCommerce
             $changedData['subscriber_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
             $changedData['sms_status'] = Sender_Helper::UPDATE_STATUS_ACTIVE;
         } else {
-            if (Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
+            if (!Sender_Helper::shouldChangeChannelStatus($userId, 'user')) {
                 update_user_meta(
                     $userId,
                     Sender_Helper::EMAIL_MARKETING_META_KEY,
@@ -374,7 +374,7 @@ class Sender_WooCommerce
                 $attachSubscriber['newsletter'] = true;
             }
         } else {
-            if (Sender_Helper::shouldChangeChannelStatus($orderId, 'order')) {
+            if (!Sender_Helper::shouldChangeChannelStatus($orderId, 'order')) {
                 update_post_meta(
                     $orderId,
                     Sender_Helper::EMAIL_MARKETING_META_KEY,
