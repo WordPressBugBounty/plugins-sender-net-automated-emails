@@ -729,6 +729,10 @@
         const labelSection = document.getElementById('sender-newsletter-label-section');
         const precheckOption = document.getElementById('sender-precheck-option');
 
+        if (!toggleCheckbox || !labelSection || !precheckOption) {
+            return;
+        }
+
         function toggleDependentSections() {
             if (toggleCheckbox.checked) {
                 labelSection.classList.remove('sender-disabled-field');
