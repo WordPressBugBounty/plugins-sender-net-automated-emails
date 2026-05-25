@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 7.1
-Stable tag: 2.10.17
+Stable tag: 2.10.18
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -141,7 +141,7 @@ This plugin supports 3 different ways to do that:
 = Minimum Requirements =
 
 * WordPress 4.2 or greater
-* PHP version 5.6 or greater
+* PHP version 7.1 or greater
 * Use Woocommerce if you want to use Sender automation features.
 
 = Installation =
@@ -434,5 +434,7 @@ purchased
 * Handle bug on subscriber status update
 = 2.10.17 2026-05-06 =
 * Handle login bug
-
-
+= 2.10.18 2026-05-22 =
+* WordPress 7.0 compatibility update
+* Check compatibility with WordPress 7.0 PHP requirements
+* Improve Sender form block compatibility with iframed editor screens

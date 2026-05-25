@@ -1,11 +1,14 @@
 //Checkout
 jQuery(document).ready(function () {
-    var emailField = jQuery('input#email, input#billing_email');
-
-    function handleEmailFieldChange() {
+    function handleEmailFieldChange(event) {
+        var emailField = jQuery(event.target);
         var emailValue = emailField.val();
         var newsletterChecked =
             jQuery('input[name="sender_newsletter"]:checked').length > 0;
+
+        if (!emailValue || emailValue.indexOf('@') === -1) {
+            return;
+        }
 
         jQuery.ajax({
             type: 'POST',
@@ -16,7 +19,9 @@ jQuery(document).ready(function () {
                 newsletter: newsletterChecked ? 1 : 0
             },
             success: function (response) {
-                sender('trackVisitors', {email: emailValue});
+                if (typeof sender === 'function') {
+                    sender('trackVisitors', {email: emailValue});
+                }
             },
             error: function (textStatus, errorThrown) {
                 console.log("AJAX Error: " + textStatus + ", " + errorThrown);
@@ -24,7 +29,7 @@ jQuery(document).ready(function () {
         });
     }
 
-    emailField.on('change', handleEmailFieldChange);
+    jQuery(document.body).on('change blur', 'input#email, input#billing_email', handleEmailFieldChange);
 });
 
 //TrackVisitor

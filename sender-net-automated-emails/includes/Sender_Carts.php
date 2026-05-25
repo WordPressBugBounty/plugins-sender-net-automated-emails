@@ -41,7 +41,7 @@ class Sender_Carts
 
         // Normal flow: thankyou page
         add_action('woocommerce_thankyou', [$this, 'senderConvertCart'], 5, 1);
-        add_action('woocommerce_thankyou', [$this, 'addConvertCartScript'], 20, 1);
+        add_action('woocommerce_thankyou', [$this, 'outputConvertCartScript'], 20, 1);
 
         // AJAX ping to confirm JS executed
         add_action('wp_ajax_nopriv_thankyou_seen', [$this, 'senderMarkThankYouSeen']);
@@ -516,6 +516,10 @@ class Sender_Carts
                 $cart = (new Sender_Cart())->find($_COOKIE['sender_recovered_cart']);
             }
 
+            if (!($cart instanceof Sender_Cart)) {
+                $cart = $this->senderFindActiveCart();
+            }
+
             // If Woo cart is empty now, delete mapped Sender cart and stop
             if (empty($items)) {
                 if (function_exists('is_order_received_page') && is_order_received_page()) {
@@ -527,7 +531,7 @@ class Sender_Carts
 
                 $toDelete = ($cart instanceof Sender_Cart) ? $cart : $this->senderFindActiveCart();
                 if ($toDelete instanceof Sender_Cart) {
-                    if ($toDelete->cart_status != Sender_Helper::CONVERTED_CART && $toDelete->status !== Sender_Helper::UNPAID_CART) {
+                    if ($toDelete->cart_status != Sender_Helper::CONVERTED_CART && $toDelete->cart_status !== Sender_Helper::UNPAID_CART) {
                         $toDelete->delete();
                         $this->sender->senderApi->senderApiShutdownCallback("senderDeleteCart", $toDelete->id);
                     }
@@ -557,6 +561,14 @@ class Sender_Carts
 
             // Update existing cart
             if ($cart instanceof Sender_Cart) {
+                if (!$senderUser && $this->senderUserId) {
+                    $senderUser = (new Sender_User())->find($this->senderUserId);
+                }
+
+                if ($senderUser && (int)$cart->user_id !== (int)$senderUser->id) {
+                    $cart->user_id = $senderUser->id;
+                }
+
                 $oldUpdatedValue = $cart->updated;
                 $cart->cart_data = $cartData;
                 $cart->update();
@@ -607,6 +619,8 @@ class Sender_Carts
             $newCart = new Sender_Cart();
             $newCart->cart_data = $cartData;
             $newCart->user_id   = $this->senderUserId ?: $senderUser->id;
+            $newCart->cart_recovered = 0;
+            $newCart->cart_status = 0;
             $newCart->save();
 
             if ($wc && $wc->session) {
@@ -771,22 +785,32 @@ class Sender_Carts
         }
     }
 
-    public function senderConvertCartFallback($order_id) {
-        if (get_transient('sender_thankyou_script_' . $order_id)) {
-            return;
+    public function senderConvertCartFallback($order_id): bool
+    {
+        $order_id = absint($order_id);
+        if (!$order_id || get_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id)) {
+            return false;
         }
 
-        $cartData = get_post_meta($order_id, '_sender_cart_data', true);
+        $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
         $cartId = get_post_meta($order_id, Sender_Helper::SENDER_CART_META, true);
 
         if (empty($cartData) || empty($cartId)) {
-            return;
+            $this->senderConvertCart($order_id);
+            $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
+            $cartId = get_post_meta($order_id, Sender_Helper::SENDER_CART_META, true);
         }
 
-        $this->sender->senderApi->senderApiShutdownCallbackMulti(
-                "senderConvertCart",
-                [$cartId, $cartData]
-        );
+        if (empty($cartData) || empty($cartId)) {
+            return false;
+        }
+
+        if (!$this->sender->senderApi->senderConvertCart($cartId, $cartData)) {
+            return false;
+        }
+
+        set_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id, -1, 3600);
+        return true;
     }
 
     public function addConvertCartScript($order_id)
@@ -810,6 +834,11 @@ class Sender_Carts
         </script>
         <?php
         return ob_get_clean();
+    }
+
+    public function outputConvertCartScript($order_id)
+    {
+        echo $this->addConvertCartScript($order_id);
     }
 
     public function addTrackCartScript($cartData)
@@ -1145,7 +1174,7 @@ class Sender_Carts
         wp_enqueue_script(
                 'subscribe-newsletter-block',
                 plugins_url('js/subscribe-newsletter.block.js', __FILE__),
-                ['wp-blocks', 'wp-i18n', 'wp-element'],
+                ['wp-blocks', 'wp-element', 'wp-i18n'],
                 filemtime(plugin_dir_path(__FILE__) . 'js/subscribe-newsletter.block.js')
         );
 
@@ -1240,7 +1269,6 @@ class Sender_Carts
     {
         if (!get_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id)) {
             $this->senderConvertCartFallback($order_id);
-            set_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id, -1, 3600);
         }
     }
 

@@ -1189,6 +1189,7 @@ class Sender_WooCommerce
         $cart = new Sender_Cart();
         $cart->cart_data = $result;
         $cart->user_id = $senderUser->id;
+        $cart->cart_recovered = 0;
         $cart->cart_status = Sender_Helper::UNPAID_CART;
         $cart->save();
 

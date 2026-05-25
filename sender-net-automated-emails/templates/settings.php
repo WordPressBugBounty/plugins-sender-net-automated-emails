@@ -691,7 +691,9 @@
 
     jQuery(function ($) {
         const $repeater = $('#sender-role-group-repeater');
-        const $roles = <?php echo json_encode(array_map(fn($r) => $r['name'], get_editable_roles())); ?>;
+        const $roles = <?php echo json_encode(array_map(function ($role) {
+            return $role['name'];
+        }, get_editable_roles())); ?>;
         const $groups = <?php echo json_encode($groups); ?>;
 
         $('#sender-add-role-group').on('click', function () {

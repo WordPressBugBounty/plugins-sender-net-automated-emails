@@ -1,6 +1,41 @@
 (function (blocks, editor, components, i18n) {
     var el = wp.element.createElement;
 
+    function getEditorWindows() {
+        var windows = [window];
+        var iframes = document.querySelectorAll('iframe');
+
+        Array.prototype.forEach.call(iframes, function (iframe) {
+            try {
+                if (iframe.contentWindow) {
+                    windows.push(iframe.contentWindow);
+                }
+            } catch (error) {
+                // Cross-origin editor frames are not usable for block previews.
+            }
+        });
+
+        return windows;
+    }
+
+    function renderForm(form) {
+        getEditorWindows().forEach(function (editorWindow) {
+            if (editorWindow.senderForms && typeof editorWindow.senderForms.render === 'function') {
+                setTimeout(function () {
+                    editorWindow.senderForms.render(form.id);
+                });
+            }
+        });
+    }
+
+    function destroyForm(formHash) {
+        getEditorWindows().forEach(function (editorWindow) {
+            if (editorWindow.senderForms && typeof editorWindow.senderForms.destroy === 'function') {
+                editorWindow.senderForms.destroy(formHash);
+            }
+        });
+    }
+
     blocks.registerBlockType('sender/sender-forms', {
         title: i18n.__('Sender.net Form'),
         category: 'widgets',
@@ -16,9 +51,7 @@
             const formsData = window.senderFormsBlockData.formsData || [];
 
             const onChange = function (newValue) {
-                if (typeof senderForms !== 'undefined') {
-                    senderForms.destroy(attributes.form);
-                }
+                destroyForm(attributes.form);
                 setAttributes({form: newValue});
                 appendScript(newValue);
             };
@@ -34,13 +67,7 @@
                     return;
                 }
 
-                var _window = window;
-
-                if (document.body.querySelector('.edit-site-visual-editor__editor-canvas')) {
-                    _window = document.body.querySelector('.edit-site-visual-editor__editor-canvas').contentWindow.document.defaultView;
-                }
-
-                setTimeout(() => _window.senderForms.render(form.id));
+                renderForm(form);
             };
 
             return (
@@ -77,4 +104,3 @@
     window.wp.components,
     window.wp.i18n
 );
-

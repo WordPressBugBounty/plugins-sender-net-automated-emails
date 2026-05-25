@@ -13,15 +13,21 @@ class Sender_Forms_Block
 
     public function register_block()
     {
+        if ($this->is_widgets_editor()) {
+            return;
+        }
+
         wp_enqueue_script(
             'sender-forms-block',
             plugins_url('js/sender-forms-block.js', __FILE__),
-            array('wp-blocks', 'wp-components', 'wp-i18n'),
+            array('wp-blocks', 'wp-components', 'wp-element', 'wp-i18n'),
             filemtime(plugin_dir_path(__FILE__) . 'js/sender-forms-block.js')
         );
 
-        wp_localize_script('sender-forms-block', 'senderFormsBlockData', array(
-            'formsData' => $this->get_forms_data())
+        wp_localize_script(
+            'sender-forms-block',
+            'senderFormsBlockData',
+            array('formsData' => $this->get_forms_data())
         );
     }
 
@@ -49,6 +55,17 @@ class Sender_Forms_Block
         }
 
         return get_option('sender_forms_data', array());
+    }
+
+    private function is_widgets_editor()
+    {
+        if (!function_exists('get_current_screen')) {
+            return false;
+        }
+
+        $screen = get_current_screen();
+
+        return $screen && $screen->id === 'widgets';
     }
 }
 
