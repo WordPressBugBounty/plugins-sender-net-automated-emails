@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.0
 Requires PHP: 7.1
-Stable tag: 2.10.18
+Stable tag: 2.10.19
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -438,3 +438,6 @@ purchased
 * WordPress 7.0 compatibility update
 * Check compatibility with WordPress 7.0 PHP requirements
 * Improve Sender form block compatibility with iframed editor screens
+= 2.10.19 2026-06-15 =
+* Fix Sender scripts breaking Gutenberg editor
+

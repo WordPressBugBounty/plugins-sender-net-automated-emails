@@ -113,6 +113,10 @@ class Sender_Automated_Emails
 
         if (is_admin()) {
             add_action('wp_print_scripts', function () {
+                if ($this->senderIsBlockEditorScreen()) {
+                    return;
+                }
+
                 $this->insertSdkScript();
             });
         }
@@ -323,6 +327,17 @@ class Sender_Automated_Emails
         $this->addSenderPluginVersion();
 
         echo ob_get_clean();
+    }
+
+    private function senderIsBlockEditorScreen()
+    {
+        if (!function_exists('get_current_screen')) {
+            return false;
+        }
+
+        $screen = get_current_screen();
+
+        return $screen && method_exists($screen, 'is_block_editor') && $screen->is_block_editor();
     }
 
     public function enqueueSenderWordpressJs()
