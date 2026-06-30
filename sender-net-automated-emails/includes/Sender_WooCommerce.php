@@ -1194,13 +1194,8 @@ class Sender_WooCommerce
         $cart->save();
 
         $baseUrl = wc_get_cart_url();
-        $lastCharacter = substr($baseUrl, -1);
-
-        if (strcmp($lastCharacter, '/') === 0) {
-            $cartUrl = rtrim($baseUrl, '/') . '?hash=' . $cart->id;
-        } else {
-            $cartUrl = $baseUrl . '&hash=' . $cart->id;
-        }
+        $separator = empty(parse_url($baseUrl, PHP_URL_QUERY)) ? '?' : '&';
+        $cartUrl = $baseUrl . $separator . 'hash=' . $cart->id;
 
         $data = [
             "external_id" => $cart->id,
