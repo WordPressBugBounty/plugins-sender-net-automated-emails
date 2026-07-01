@@ -4,6 +4,7 @@
     const el = wp.element.createElement;
 
     registerBlockType('sender-net-automated-emails/subscribe-newsletter-block', {
+        apiVersion: 3,
         title: __('Subscribe newsletter'),
         icon: 'sender-block-icon',
         category: 'widgets',

@@ -833,7 +833,20 @@ class Sender_Carts
 
     public function outputConvertCartScript($order_id)
     {
+        $this->scheduleThankYouFallbackCheck($order_id);
         echo $this->addConvertCartScript($order_id);
+    }
+
+    private function scheduleThankYouFallbackCheck($order_id)
+    {
+        $order_id = absint($order_id);
+        if (!$order_id) {
+            return;
+        }
+
+        if (!wp_next_scheduled('sender_check_thankyou_seen', [$order_id])) {
+            wp_schedule_single_event(time() + 300, 'sender_check_thankyou_seen', [$order_id]);
+        }
     }
 
     public function addTrackCartScript($cartData)
@@ -1303,9 +1316,7 @@ class Sender_Carts
             echo $this->addConvertCartScript($order_id);
         }, 5);
 
-        if (!wp_next_scheduled('sender_check_thankyou_seen', [$order_id])) {
-            wp_schedule_single_event(time() + 300, 'sender_check_thankyou_seen', [$order_id]);
-        }
+        $this->scheduleThankYouFallbackCheck($order_id);
 
         return $template;
     }

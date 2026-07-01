@@ -292,6 +292,10 @@ class Sender_Automated_Emails
     public function insertSdkScript($isAdmin = true)
     {
         $key = $this->senderApi->senderGetResourceKey();
+        if (empty($key)) {
+            return;
+        }
+
         $script_url = $isAdmin
                 ? 'https://cdn.sender.net/accounts_resources/universal.js?explicit=true'
                 : 'https://cdn.sender.net/accounts_resources/universal.js';

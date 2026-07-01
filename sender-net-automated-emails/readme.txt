@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.0
 Requires PHP: 7.1
-Stable tag: 2.10.20
+Stable tag: 2.10.22
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -442,4 +442,8 @@ purchased
 * Fix Sender scripts breaking Gutenberg editor
 = 2.10.20 2026-06-15 =
 * Fix abandoned cart URLs when cart page has no query string
-
+= 2.10.21 2026-06-30 =
+* Fix incorrect request value errors
+= 2.10.22 2026-07-01 =
+* Fallback for convert
+* Handle editor bug

@@ -105,7 +105,11 @@ class Sender_Webhooks
 
     public function update_customer_by_id($data)
     {
-        $customer_id = $data['id'];
+        if (!isset($data['id'])) {
+            return new WP_REST_Response(['error' => 'Field id is required.'], 400);
+        }
+
+        $customer_id = (int) $data['id'];
         $customer = get_user_by('id', $customer_id);
 
         if (!$customer) {
@@ -133,7 +137,11 @@ class Sender_Webhooks
 
     public function update_customer_by_email($data)
     {
-        $customer_email = $data['email'];
+        if (empty($data['email'])) {
+            return new WP_REST_Response(['error' => 'Field email is required.'], 400);
+        }
+
+        $customer_email = sanitize_email($data['email']);
         $customer = get_user_by('email', $customer_email);
 
         if (!$customer) {
@@ -157,7 +165,11 @@ class Sender_Webhooks
 
     public function get_customers_by_id($data)
     {
-        $customerIds = $data['customer_ids'];
+        if (empty($data['customer_ids']) || !is_array($data['customer_ids'])) {
+            return new WP_REST_Response(['error' => 'Field customer_ids is required.'], 400);
+        }
+
+        $customerIds = array_map('intval', $data['customer_ids']);
 
         if (empty($customerIds)){
             return new WP_REST_Response(['error' => 'No customer id provided'], 404);
@@ -199,7 +211,15 @@ class Sender_Webhooks
 
     public function get_customers_by_email($data)
     {
-        $customer_emails = $data['emails'];
+        if (empty($data['emails']) || !is_array($data['emails'])) {
+            return new WP_REST_Response(['error' => 'Field emails is required.'], 400);
+        }
+
+        $customer_emails = array_filter(array_map('sanitize_email', $data['emails']));
+
+        if (empty($customer_emails)) {
+            return new WP_REST_Response(['error' => 'No valid email provided'], 400);
+        }
 
         global $wpdb;
 
@@ -227,7 +247,9 @@ class Sender_Webhooks
             $email = $customer->billing_email;
             $firstname = $customer->billing_first_name;
             $lastname = $customer->billing_last_name;
-            $emailConsent = unserialize($customer->email_marketing_consent);
+            $emailConsent = !empty($customer->email_marketing_consent)
+                ? maybe_unserialize($customer->email_marketing_consent)
+                : '';
 
             $customer_data = [
                 'email' => $email,

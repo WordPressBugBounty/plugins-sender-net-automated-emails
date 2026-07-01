@@ -1,39 +1,44 @@
 (function (blocks, editor, components, i18n) {
     var el = wp.element.createElement;
 
-    function getEditorWindows() {
-        var windows = [window];
-        var iframes = document.querySelectorAll('iframe');
+    function getPlaceholderElement(formHash) {
+        if (!formHash) {
+            return null;
+        }
 
-        Array.prototype.forEach.call(iframes, function (iframe) {
-            try {
-                if (iframe.contentWindow) {
-                    windows.push(iframe.contentWindow);
-                }
-            } catch (error) {
-                // Cross-origin editor frames are not usable for block previews.
-            }
-        });
-
-        return windows;
+        return document.querySelector('.sender-form-field[data-sender-form-id="' + formHash + '"]');
     }
 
-    function renderForm(form) {
-        getEditorWindows().forEach(function (editorWindow) {
-            if (editorWindow.senderForms && typeof editorWindow.senderForms.render === 'function') {
-                setTimeout(function () {
-                    editorWindow.senderForms.render(form.id);
-                });
+    function renderForm(form, formHash) {
+        var placeholder = getPlaceholderElement(formHash);
+        var editorWindow;
+
+        if (!placeholder || !(placeholder instanceof Element)) {
+            return;
+        }
+
+        editorWindow = placeholder.ownerDocument && placeholder.ownerDocument.defaultView;
+
+        if (!editorWindow || !editorWindow.senderForms || typeof editorWindow.senderForms.render !== 'function') {
+            return;
+        }
+
+        setTimeout(function () {
+            if (getPlaceholderElement(formHash)) {
+                editorWindow.senderForms.render(form.id);
             }
         });
     }
 
     function destroyForm(formHash) {
-        getEditorWindows().forEach(function (editorWindow) {
-            if (editorWindow.senderForms && typeof editorWindow.senderForms.destroy === 'function') {
-                editorWindow.senderForms.destroy(formHash);
-            }
-        });
+        var placeholder = getPlaceholderElement(formHash);
+        var editorWindow = placeholder && placeholder.ownerDocument && placeholder.ownerDocument.defaultView;
+
+        if (!editorWindow || !editorWindow.senderForms || typeof editorWindow.senderForms.destroy !== 'function') {
+            return;
+        }
+
+        editorWindow.senderForms.destroy(formHash);
     }
 
     blocks.registerBlockType('sender/sender-forms', {
@@ -67,7 +72,7 @@
                     return;
                 }
 
-                renderForm(form);
+                renderForm(form, hash);
             };
 
             return (
