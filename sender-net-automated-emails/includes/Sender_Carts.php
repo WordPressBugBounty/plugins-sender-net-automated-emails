@@ -11,6 +11,7 @@ class Sender_Carts
     private $sender;
     private $senderUserId = false;
     private $inSenderCartUpdated = false;
+    private $renderedConvertCartScripts = [];
 
     const TRACK_CART = 'sender-track-cart';
     const UPDATE_CART = 'sender-update-cart';
@@ -701,9 +702,15 @@ class Sender_Carts
             }
             return $user;
         } elseif (isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
-            $senderUser = new Sender_User();
-            $senderUser->sender_subscriber_id = $_COOKIE[self::SENDER_SUBSCRIBER_ID];
-            $senderUser->save();
+            $subscriberId = sanitize_text_field($_COOKIE[self::SENDER_SUBSCRIBER_ID]);
+            $senderUser = (new Sender_User())->findBy('sender_subscriber_id', $subscriberId);
+
+            if (!$senderUser) {
+                $senderUser = new Sender_User();
+                $senderUser->sender_subscriber_id = $subscriberId;
+                $senderUser->save();
+            }
+
             return $senderUser;
         }
 
@@ -810,6 +817,11 @@ class Sender_Carts
 
     public function addConvertCartScript($order_id)
     {
+        $order_id = absint($order_id);
+        if (!$order_id || isset($this->renderedConvertCartScripts[$order_id])) {
+            return '';
+        }
+
         $cartData = get_post_meta($order_id, Sender_Helper::SENDER_CART_DATA, true);
 
         if (empty($cartData)) {
@@ -819,6 +831,8 @@ class Sender_Carts
                 return '';
             }
         }
+
+        $this->renderedConvertCartScripts[$order_id] = true;
 
         ob_start(); ?>
         <script>
