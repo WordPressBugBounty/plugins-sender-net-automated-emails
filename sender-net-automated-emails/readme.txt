@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
-Tested up to: 7.0
+Tested up to: 7.0.3
 Requires PHP: 7.1
-Stable tag: 2.10.23
+Stable tag: 2.10.24
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -449,3 +449,5 @@ purchased
 * Handle editor bug
 = 2.10.23 2026-07-17 =
 * Fix duplicate automation triggers on purchase and abandoned cart flows
+= 2.10.24 2026-08-10 =
+* Fix abandoned cart emails sending after purchase

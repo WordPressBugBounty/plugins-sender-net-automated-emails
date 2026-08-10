@@ -161,7 +161,15 @@ class Sender_Carts
     public function senderLoadOrderForConvert($orderId)
     {
         $order = wc_get_order($orderId);
-        return $this->prepareConvertCart($order);
+        if (!$order) {
+            return false;
+        }
+
+        if (!$this->prepareConvertCart($order)) {
+            return false;
+        }
+
+        return $this->senderConvertCart($orderId);
     }
 
     public function prepareConvertCart($order)
@@ -1281,10 +1289,21 @@ class Sender_Carts
     public function senderMarkThankYouSeen()
     {
         $order_id = intval($_GET['order_id'] ?? 0);
+        $converted = false;
+
         if ($order_id) {
-            set_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id, 1, 3600);
+            // Confirm the remote cart conversion server-side before suppressing the fallback.
+            $converted = $this->senderConvertCartFallback($order_id);
+
+            if ($converted) {
+                set_transient(Sender_Helper::TRANSIENT_SENDER_THANK_YOU . $order_id, 1, 3600);
+            }
         }
-        wp_send_json_success(['order_id' => $order_id]);
+
+        wp_send_json_success([
+                'order_id' => $order_id,
+                'converted' => $converted,
+        ]);
     }
 
     public function runFallbackIfNotSeen($order_id)
