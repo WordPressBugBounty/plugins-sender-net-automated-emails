@@ -486,38 +486,54 @@ class Sender_WooCommerce
         echo $script_code;
     }
 
-    private function getWooClientsOrderCompleted($chunkSize, $offset = 0)
+    private function getCompletedCustomerExportStatuses(): array
     {
-        global $wpdb;
-        return $wpdb->get_results("
-            SELECT DISTINCT
-                pm1.meta_value AS first_name,
-                pm2.meta_value AS last_name,
-                pm3.meta_value AS phone,
-                pm4.meta_value AS email,
-                pm5.meta_value AS newsletter,
-                pm6.meta_value AS email_marketing_consent
-            FROM {$wpdb->posts} AS o
-                LEFT JOIN {$wpdb->postmeta} AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
-                LEFT JOIN {$wpdb->postmeta} AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
-                LEFT JOIN {$wpdb->postmeta} AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
-                LEFT JOIN {$wpdb->postmeta} AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
-                LEFT JOIN {$wpdb->postmeta} AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
-                LEFT JOIN {$wpdb->postmeta} AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
-            WHERE
-                o.post_type = 'shop_order'
-                AND o.post_status IN ('wc-completed', 'wc-on-hold')
-                AND pm4.meta_value IS NOT NULL
-            LIMIT $chunkSize
-            OFFSET $offset
-        ");
+        return ['wc-completed', 'wc-on-hold', 'wc-processing'];
     }
 
-    private function getWooClientsOrderNotCompleted($chunkSize = null, $offset = 0)
+    private function getOrderStatusSql(array $statuses, $include = true): array
+    {
+        $placeholders = implode(', ', array_fill(0, count($statuses), '%s'));
+        $operator = $include ? 'IN' : 'NOT IN';
+
+        return [
+            'sql' => "o.post_status {$operator} ({$placeholders})",
+            'params' => $statuses,
+        ];
+    }
+
+    private function getUniqueWooCustomerCount(array $statuses, $include = true): int
     {
         global $wpdb;
-        return $wpdb->get_results("
-             SELECT DISTINCT
+
+        $statusSql = $this->getOrderStatusSql($statuses, $include);
+        $query = "
+            SELECT COUNT(*)
+            FROM (
+                SELECT LOWER(pm.meta_value) AS normalized_email
+                FROM {$wpdb->posts} AS o
+                    INNER JOIN {$wpdb->postmeta} AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
+                WHERE
+                    o.post_type = 'shop_order'
+                    AND {$statusSql['sql']}
+                    AND pm.meta_value IS NOT NULL
+                    AND pm.meta_value != ''
+                GROUP BY LOWER(pm.meta_value)
+            ) AS unique_customers
+        ";
+
+        return (int) $wpdb->get_var($wpdb->prepare($query, $statusSql['params']));
+    }
+
+    private function getWooClientsByOrderStatus(array $statuses, $include = true, $chunkSize = 200, $offset = 0)
+    {
+        global $wpdb;
+
+        $statusSql = $this->getOrderStatusSql($statuses, $include);
+        $params = array_merge($statusSql['params'], [$chunkSize, $offset]);
+
+        $query = "
+            SELECT
                 pm1.meta_value AS first_name,
                 pm2.meta_value AS last_name,
                 pm3.meta_value AS phone,
@@ -525,19 +541,55 @@ class Sender_WooCommerce
                 pm5.meta_value AS newsletter,
                 pm6.meta_value AS email_marketing_consent
             FROM {$wpdb->posts} AS o
+                INNER JOIN (
+                    SELECT MAX(o.ID) AS order_id
+                    FROM {$wpdb->posts} AS o
+                        INNER JOIN {$wpdb->postmeta} AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
+                    WHERE
+                        o.post_type = 'shop_order'
+                        AND {$statusSql['sql']}
+                        AND pm4.meta_value IS NOT NULL
+                        AND pm4.meta_value != ''
+                    GROUP BY LOWER(pm4.meta_value)
+                    ORDER BY LOWER(pm4.meta_value) ASC
+                    LIMIT %d
+                    OFFSET %d
+                ) AS latest_orders ON latest_orders.order_id = o.ID
                 LEFT JOIN {$wpdb->postmeta} AS pm1 ON o.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
                 LEFT JOIN {$wpdb->postmeta} AS pm2 ON o.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
                 LEFT JOIN {$wpdb->postmeta} AS pm3 ON o.ID = pm3.post_id AND pm3.meta_key = '_billing_phone'
                 LEFT JOIN {$wpdb->postmeta} AS pm4 ON o.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
                 LEFT JOIN {$wpdb->postmeta} AS pm5 ON o.ID = pm5.post_id AND pm5.meta_key = 'sender_newsletter'
                 LEFT JOIN {$wpdb->postmeta} AS pm6 ON o.ID = pm6.post_id AND pm6.meta_key = 'email_marketing_consent'
-            WHERE
-                o.post_type = 'shop_order'
-                AND o.post_status NOT IN ('wc-completed', 'wc-on-hold')
-                AND pm4.meta_value IS NOT NULL
-            LIMIT $chunkSize
-            OFFSET $offset
-        ");
+            ORDER BY LOWER(pm4.meta_value) ASC
+        ";
+
+        return $wpdb->get_results($wpdb->prepare($query, $params));
+    }
+
+    private function getRegisteredUserExportQueryArgs($chunkSize = null, $offset = 0): array
+    {
+        $args = [
+            'fields' => 'ID',
+            'orderby' => 'ID',
+            'order' => 'ASC',
+        ];
+
+        $mappingEnabled = get_option('sender_enable_role_group_mapping');
+        $roleMap = array_filter((array) get_option('sender_role_group_map'));
+
+        if ($mappingEnabled && !empty($roleMap)) {
+            $args['role__in'] = array_keys($roleMap);
+        } else {
+            $args['role'] = 'customer';
+        }
+
+        if ($chunkSize !== null) {
+            $args['number'] = $chunkSize;
+            $args['offset'] = $offset;
+        }
+
+        return $args;
     }
 
     public function exportCustomers()
@@ -546,13 +598,8 @@ class Sender_WooCommerce
         $chunkSize = 200;
 
         #Extract customers which completed order
-        $totalCompleted = $wpdb->get_var("SELECT COUNT(DISTINCT pm.meta_value)
-        FROM {$wpdb->posts} AS o
-            LEFT JOIN {$wpdb->postmeta} AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
-        WHERE
-            o.post_type = 'shop_order'
-            AND o.post_status IN ('wc-completed', 'wc-on-hold', 'wc-processing')
-            AND pm.meta_value IS NOT NULL");
+        $completedStatuses = $this->getCompletedCustomerExportStatuses();
+        $totalCompleted = $this->getUniqueWooCustomerCount($completedStatuses);
 
         $this->logExportDebugInfo('CustomersExport', "Total customers with completed orders: $totalCompleted");
 
@@ -561,26 +608,20 @@ class Sender_WooCommerce
             $loopTimes = floor($totalCompleted / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
                 $this->logExportDebugInfo('CompletedOrders Chunk', "Offset: $clientCompleted | Chunk size: $chunkSize");
-                $woocommerceClientOrdersCompleted = $this->getWooClientsOrderCompleted($chunkSize, $clientCompleted);
+                $woocommerceClientOrdersCompleted = $this->getWooClientsByOrderStatus($completedStatuses, true, $chunkSize, $clientCompleted);
                 $customerList = json_decode(json_encode($woocommerceClientOrdersCompleted), true);
                 $this->sendWoocommerceCustomersToSender($customerList, get_option('sender_customers_list'));
                 $clientCompleted += $chunkSize;
             }
         } else {
             $this->logExportDebugInfo('CompletedOrders Chunk', "Offset: 0 | Chunk size: $chunkSize");
-            $woocommerceClientOrdersCompleted = $this->getWooClientsOrderCompleted($chunkSize);
+            $woocommerceClientOrdersCompleted = $this->getWooClientsByOrderStatus($completedStatuses, true, $chunkSize);
             $customerList = json_decode(json_encode($woocommerceClientOrdersCompleted), true);
             $this->sendWoocommerceCustomersToSender($customerList, get_option('sender_customers_list'));
         }
 
         #Extract customers which did not complete order
-        $totalNotCompleted = $wpdb->get_var("SELECT COUNT(DISTINCT pm.meta_value)
-        FROM {$wpdb->posts} AS o
-            LEFT JOIN {$wpdb->postmeta} AS pm ON o.ID = pm.post_id AND pm.meta_key = '_billing_email'
-        WHERE
-            o.post_type = 'shop_order'
-            AND o.post_status NOT IN ('wc-completed', 'wc-on-hold', 'wc-processing')
-            AND pm.meta_value IS NOT NULL");
+        $totalNotCompleted = $this->getUniqueWooCustomerCount($completedStatuses, false);
 
         $this->logExportDebugInfo('CustomersExport', "Total customers with incomplete orders: $totalNotCompleted");
 
@@ -589,35 +630,30 @@ class Sender_WooCommerce
             $loopTimes = floor($totalNotCompleted / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
                 $this->logExportDebugInfo('NotCompletedOrders Chunk', "Offset: $clientNotCompleted | Chunk size: $chunkSize");
-                $woocommerceClientOrdersNotCompleted = $this->getWooClientsOrderNotCompleted($chunkSize, $clientNotCompleted);
+                $woocommerceClientOrdersNotCompleted = $this->getWooClientsByOrderStatus($completedStatuses, false, $chunkSize, $clientNotCompleted);
                 $customerList = json_decode(json_encode($woocommerceClientOrdersNotCompleted), true);
                 $this->sendWoocommerceCustomersToSender($customerList);
                 $clientNotCompleted += $chunkSize;
             }
         } else {
             $this->logExportDebugInfo('NotCompletedOrders Chunk', "Offset: 0 | Chunk size: $chunkSize");
-            $woocommerceClientOrdersNotCompleted = $this->getWooClientsOrderNotCompleted($chunkSize);
+            $woocommerceClientOrdersNotCompleted = $this->getWooClientsByOrderStatus($completedStatuses, false, $chunkSize);
             $customerList = json_decode(json_encode($woocommerceClientOrdersNotCompleted), true);
             $this->sendWoocommerceCustomersToSender($customerList);
         }
 
-        #Extract WP users with role customer. Registrations
-        $usersQuery = new WP_User_Query(['fields' => 'id', 'role' => 'customer']);
+        #Extract registered WP users that should be exported from registration settings
+        $usersQuery = new WP_User_Query($this->getRegisteredUserExportQueryArgs());
         $usersCount = $usersQuery->get_total();
 
-        $this->logExportDebugInfo('CustomersExport', "Total registered WP customers: $usersCount");
+        $this->logExportDebugInfo('CustomersExport', "Total registered WP users selected for export: $usersCount");
 
         $usersExported = 0;
         if ($usersCount > $chunkSize) {
             $loopTimes = floor($usersCount / $chunkSize);
             for ($x = 0; $x <= $loopTimes; $x++) {
                 $this->logExportDebugInfo('WPUsers Chunk', "Offset: $usersExported | Chunk size: $chunkSize");
-                $usersQuery = new WP_User_Query([
-                    'fields' => 'id',
-                    'role' => 'customer',
-                    'number' => $chunkSize,
-                    'offset' => $usersExported
-                ]);
+                $usersQuery = new WP_User_Query($this->getRegisteredUserExportQueryArgs($chunkSize, $usersExported));
                 $customerList = json_decode(json_encode($usersQuery->get_results(), true));
                 $this->sendUsersToSender($customerList);
                 $usersExported += $chunkSize;
@@ -752,7 +788,6 @@ class Sender_WooCommerce
     public function sendUsersToSender($customers)
     {
         $customersExportData = [];
-        $autoSubscribeEnabled = get_option('sender_subscribe_label');
 
         foreach ($customers as $customerId) {
             $customer = get_user_meta($customerId);
@@ -772,10 +807,6 @@ class Sender_WooCommerce
             $isSubscribed = is_array($emailConsent)
                     && isset($emailConsent['state'])
                     && $emailConsent['state'] === Sender_Helper::SUBSCRIBED;
-
-            if (!$autoSubscribeEnabled && !$isSubscribed) {
-                continue;
-            }
 
             $data = [
                     'id'        => $customerId,

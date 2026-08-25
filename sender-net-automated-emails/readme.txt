@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.0.3
 Requires PHP: 7.1
-Stable tag: 2.10.24
+Stable tag: 2.10.25
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -451,3 +451,8 @@ purchased
 * Fix duplicate automation triggers on purchase and abandoned cart flows
 = 2.10.24 2026-08-10 =
 * Fix abandoned cart emails sending after purchase
+= 2.10.25 2026-08-25 =
+* Improved WooCommerce purchase syncing for paid, completed, and subscription orders.
+* Fixed missed repeat purchase group syncs and product-purchase automation triggers.
+* Added support for subscription renewal payment purchase handling.
+* Fixed registered user export being blocked by the newsletter checkbox display setting.

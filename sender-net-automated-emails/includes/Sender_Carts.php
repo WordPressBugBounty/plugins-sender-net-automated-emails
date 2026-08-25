@@ -36,6 +36,9 @@ class Sender_Carts
     {
         //Handle cart changes and convert
         add_action('woocommerce_checkout_order_processed', [$this, 'senderLoadOrderForConvert'], 10, 1);
+        add_action('woocommerce_payment_complete', [$this, 'senderHandlePaidOrder'], 10, 1);
+        add_action('woocommerce_subscription_payment_complete', [$this, 'senderHandlePaidOrder'], 10, 1);
+        add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'senderHandleRenewalPaymentComplete'], 10, 2);
 
         add_action('woocommerce_store_api_checkout_order_processed', [$this, 'prepareConvertCart']);
         add_action('woocommerce_cart_updated', [$this, 'senderCartUpdated']);
@@ -1003,113 +1006,346 @@ class Sender_Carts
             return;
         }
 
-        $senderRemoteCartId = get_post_meta($orderId, Sender_Helper::SENDER_CART_META, true);
+        switch ($newOrderStatus) {
+            case Sender_Helper::ORDER_COMPLETED:
+                $this->senderHandlePaidOrder($orderId);
 
-        if (!empty($senderRemoteCartId)){
-            #Check if cart exists
-            $cart = (new Sender_Cart())->findByAttributes(
-                    [
-                            'id' => $senderRemoteCartId,
-                    ]
-            );
+                $senderRemoteCartId = get_post_meta($orderId, Sender_Helper::SENDER_CART_META, true);
+                if (empty($senderRemoteCartId)) {
+                    return;
+                }
 
-            if (!$cart){
+                $cart = (new Sender_Cart())->findByAttributes(
+                        [
+                                'id' => $senderRemoteCartId,
+                        ]
+                );
+
+                if (!$cart) {
+                    return;
+                }
+
+                $cartStatus = [
+                        "external_id" => $cart->id,
+                        'order_id' => (string)$orderId,
+                        'cart_status' => $newOrderStatus,
+                        'resource_key' => $this->senderGetResourceKey(),
+                ];
+
+                $this->sender->senderApi->senderUpdateCartStatus($cart->id, $cartStatus);
                 return;
-            }
-
-            switch ($newOrderStatus) {
-                case Sender_Helper::ORDER_PAID:
-                    $wcOrder = wc_get_order($orderId);
-                    $list = get_option('sender_customers_list');
-
-                    $subtotal = $wcOrder->get_subtotal();
-                    $discount = $wcOrder->get_total_discount();
-                    $tax = $wcOrder->get_total_tax();
-                    $shipping_charge = $wcOrder->get_shipping_total();
-                    $total = $wcOrder->get_total();
-                    $order_date = date('d/m/Y', strtotime($wcOrder->get_date_created()));
-                    $payment_method = $wcOrder->get_payment_method_title();
-
-                    $billing = [
-                            'first_name' => $wcOrder->get_billing_first_name(),
-                            'last_name' => $wcOrder->get_billing_last_name(),
-                            'address' => $wcOrder->get_billing_address_1(),
-                            'city' => $wcOrder->get_billing_city(),
-                            'state' => $wcOrder->get_billing_state(),
-                            'zip' => $wcOrder->get_billing_postcode(),
-                            'country' => $wcOrder->get_billing_country(),
-                            'customer_ip' => $wcOrder->get_customer_ip_address(),
-                    ];
-
-                    $shipping = [
-                            'first_name' => $wcOrder->get_shipping_first_name(),
-                            'last_name' => $wcOrder->get_shipping_last_name(),
-                            'address' => $wcOrder->get_shipping_address_1(),
-                            'city' => $wcOrder->get_shipping_city(),
-                            'state' => $wcOrder->get_shipping_state(),
-                            'zip' => $wcOrder->get_shipping_postcode(),
-                            'country' => $wcOrder->get_shipping_country(),
-                            'shipping_charge' => number_format($shipping_charge, 2),
-                            'payment_method' => $payment_method,
-                    ];
-
-                    $orderDetails = [
-                            'total' => number_format($total, 2),
-                            'subtotal' => number_format($subtotal, 2),
-                            'discount' => number_format($discount, 2),
-                            'tax' => number_format($tax, 2),
-                            'order_date' => $order_date,
-                    ];
-
-                    $storeId = get_option('sender_store_register') ?: '';
-                    if (empty($storeId)){
-                        $this->fixEmptyStoreRegistered();
-                        $storeId = get_option('sender_store_register')?: '';
-                    }
-
-                    $cartData = [
-                            'external_id' => $cart->id,
-                            'email' => strtolower($wcOrder->get_billing_email()),
-                            'firstname' => $wcOrder->get_billing_first_name(),
-                            'lastname' => $wcOrder->get_billing_last_name(),
-                            'resource_key' => $this->senderGetResourceKey(),
-                            'phone' => $wcOrder->get_billing_phone(),
-                            'order_id' => (string)$orderId,
-                            'billing' => $billing,
-                            'shipping' => $shipping,
-                            'order_details' => $orderDetails,
-                            'store_id' => $storeId,
-                    ];
-
-                    if ($list) {
-                        $cartData['list_id'] = $list;
-                    }
-
-                    $user = get_user_by('email', $cartData['email']);
-
-                    if ($user) {
-                        $cartData['customer_id'] = $user->ID;
-                    }
-
-                    if ($this->sender->senderApi->senderConvertCart($cart->id, $cartData)) {
-                        $cart->cart_status = Sender_Helper::CONVERTED_CART;
-                        $cart->save();
-                        do_action('sender_update_customer_data', $cartData['email'], true);
-                    }
+            case Sender_Helper::ORDER_PENDING_PAYMENT:
+                $senderRemoteCartId = get_post_meta($orderId, Sender_Helper::SENDER_CART_META, true);
+                if (empty($senderRemoteCartId)) {
                     return;
-                case Sender_Helper::ORDER_COMPLETED:
-                case Sender_Helper::ORDER_PENDING_PAYMENT:
-                    $cartStatus = [
-                            "external_id" => $cart->id,
-                            'order_id' => (string)$orderId,
-                            'cart_status' => $newOrderStatus,
-                            'resource_key' => $this->senderGetResourceKey(),
-                    ];
+                }
 
-                    $this->sender->senderApi->senderUpdateCartStatus($cart->id, $cartStatus);
+                $cart = (new Sender_Cart())->findByAttributes(
+                        [
+                                'id' => $senderRemoteCartId,
+                        ]
+                );
+
+                if (!$cart) {
                     return;
+                }
+
+                $cartStatus = [
+                        "external_id" => $cart->id,
+                        'order_id' => (string)$orderId,
+                        'cart_status' => $newOrderStatus,
+                        'resource_key' => $this->senderGetResourceKey(),
+                ];
+
+                $this->sender->senderApi->senderUpdateCartStatus($cart->id, $cartStatus);
+                return;
+        }
+    }
+
+    public function senderHandlePaidOrder($orderId)
+    {
+        $orderId = $this->resolveOrderId($orderId);
+        if (!$orderId) {
+            return false;
+        }
+
+        $order = wc_get_order($orderId);
+        if (!$order) {
+            return false;
+        }
+
+        $cart = $this->ensureSenderCartForOrder($order);
+        if (!$cart) {
+            return false;
+        }
+
+        if ((string) $cart->cart_status === (string) Sender_Helper::CONVERTED_CART) {
+            return true;
+        }
+
+        $cartData = $this->buildConvertCartPayload($cart, $order);
+        if (!$this->sender->senderApi->senderConvertCart($cart->id, $cartData)) {
+            return false;
+        }
+
+        $cart->cart_status = Sender_Helper::CONVERTED_CART;
+        $cart->save();
+
+        do_action('sender_update_customer_data', $cartData['email'], true);
+
+        return true;
+    }
+
+    public function senderHandleRenewalPaymentComplete($subscription, $renewalOrder = null)
+    {
+        if (is_object($renewalOrder) && method_exists($renewalOrder, 'get_id')) {
+            return $this->senderHandlePaidOrder($renewalOrder->get_id());
+        }
+
+        return $this->senderHandlePaidOrder($subscription);
+    }
+
+    private function resolveOrderId($orderOrId)
+    {
+        if (is_numeric($orderOrId)) {
+            return absint($orderOrId);
+        }
+
+        if (is_object($orderOrId) && method_exists($orderOrId, 'get_id')) {
+            return absint($orderOrId->get_id());
+        }
+
+        return 0;
+    }
+
+    private function ensureSenderCartForOrder($order)
+    {
+        $senderRemoteCartId = get_post_meta($order->get_id(), Sender_Helper::SENDER_CART_META, true);
+        if (!empty($senderRemoteCartId)) {
+            $existingCart = (new Sender_Cart())->findByAttributes(['id' => $senderRemoteCartId]);
+            if ($existingCart) {
+                return $existingCart;
             }
         }
+
+        $billingEmail = strtolower((string) $order->get_billing_email());
+        if ($billingEmail === '') {
+            return false;
+        }
+
+        $senderUser = (new Sender_User())->findBy('email', $billingEmail);
+        if (!$senderUser) {
+            $senderUser = new Sender_User();
+            $senderUser->email = $billingEmail;
+            $senderUser->first_name = $order->get_billing_first_name();
+            $senderUser->last_name = $order->get_billing_last_name();
+            $senderUser->save();
+        }
+
+        $cart = new Sender_Cart();
+        $cart->cart_data = serialize($this->serializeOrderItems($order));
+        $cart->user_id = $senderUser->id;
+        $cart->cart_recovered = 0;
+        $cart->cart_status = Sender_Helper::UNPAID_CART;
+        $cart->save();
+
+        $trackPayload = $this->buildTrackCartPayload($cart, $order, $senderUser);
+        $this->sender->senderApi->senderTrackCart($trackPayload);
+
+        update_post_meta($order->get_id(), Sender_Helper::SENDER_CART_META, $cart->id);
+
+        return $cart;
+    }
+
+    private function serializeOrderItems($order): array
+    {
+        $serializedItems = [];
+
+        foreach ($order->get_items() as $itemId => $item) {
+            $product = $item->get_product();
+            if (!$product) {
+                continue;
+            }
+
+            $variationId = $item->get_variation_id();
+            $variationAttributes = $variationId ? wc_get_product_variation_attributes($variationId) : [];
+
+            $serializedItems[] = [
+                    'key' => $itemId,
+                    'product_id' => $item->get_product_id(),
+                    'variation_id' => $variationId,
+                    'variation' => $variationAttributes,
+                    'quantity' => $item->get_quantity(),
+                    'data_hash' => md5(serialize($item->get_data())),
+                    'line_tax_data' => [
+                            'subtotal' => [],
+                            'total' => []
+                    ],
+                    'line_subtotal' => $item->get_subtotal(),
+                    'line_subtotal_tax' => $item->get_subtotal_tax(),
+                    'line_total' => $item->get_total(),
+                    'line_tax' => $item->get_total_tax(),
+                    'data' => serialize($product)
+            ];
+        }
+
+        return $serializedItems;
+    }
+
+    private function buildTrackCartPayload($cart, $order, $senderUser): array
+    {
+        $storeId = get_option('sender_store_register') ?: '';
+        if (empty($storeId)) {
+            $this->fixEmptyStoreRegistered();
+            $storeId = get_option('sender_store_register') ?: '';
+        }
+
+        $baseUrl = wc_get_cart_url();
+        $separator = empty(parse_url($baseUrl, PHP_URL_QUERY)) ? '?' : '&';
+        $cartUrl = $baseUrl . $separator . 'hash=' . $cart->id;
+
+        return [
+                'external_id' => $cart->id,
+                'url' => $cartUrl,
+                'currency' => get_woocommerce_currency(),
+                'order_total' => (string) $order->get_total(),
+                'products' => $this->buildProductsPayload($order),
+                'resource_key' => $this->senderGetResourceKey(),
+                'store_id' => $storeId,
+                'email' => $senderUser->email,
+                'subscriber_id' => $senderUser->sender_subscriber_id,
+        ];
+    }
+
+    private function buildConvertCartPayload($cart, $order): array
+    {
+        $subtotal = $order->get_subtotal();
+        $discount = $order->get_total_discount();
+        $tax = $order->get_total_tax();
+        $shippingCharge = $order->get_shipping_total();
+        $total = $order->get_total();
+        $orderDate = date('d/m/Y', strtotime($order->get_date_created()));
+        $paymentMethod = $order->get_payment_method_title();
+
+        $billing = [
+                'first_name' => $order->get_billing_first_name(),
+                'last_name' => $order->get_billing_last_name(),
+                'address' => $order->get_billing_address_1(),
+                'city' => $order->get_billing_city(),
+                'state' => $order->get_billing_state(),
+                'zip' => $order->get_billing_postcode(),
+                'country' => $order->get_billing_country(),
+                'customer_ip' => $order->get_customer_ip_address(),
+        ];
+
+        $shipping = [
+                'first_name' => $order->get_shipping_first_name(),
+                'last_name' => $order->get_shipping_last_name(),
+                'address' => $order->get_shipping_address_1(),
+                'city' => $order->get_shipping_city(),
+                'state' => $order->get_shipping_state(),
+                'zip' => $order->get_shipping_postcode(),
+                'country' => $order->get_shipping_country(),
+                'shipping_charge' => number_format($shippingCharge, 2),
+                'payment_method' => $paymentMethod,
+        ];
+
+        $orderDetails = [
+                'total' => number_format($total, 2),
+                'subtotal' => number_format($subtotal, 2),
+                'discount' => number_format($discount, 2),
+                'tax' => number_format($tax, 2),
+                'order_date' => $orderDate,
+        ];
+
+        $storeId = get_option('sender_store_register') ?: '';
+        if (empty($storeId)) {
+            $this->fixEmptyStoreRegistered();
+            $storeId = get_option('sender_store_register') ?: '';
+        }
+
+        $cartData = [
+                'external_id' => $cart->id,
+                'email' => strtolower($order->get_billing_email()),
+                'firstname' => $order->get_billing_first_name(),
+                'lastname' => $order->get_billing_last_name(),
+                'resource_key' => $this->senderGetResourceKey(),
+                'phone' => $order->get_billing_phone(),
+                'order_id' => (string) $order->get_id(),
+                'billing' => $billing,
+                'shipping' => $shipping,
+                'order_details' => $orderDetails,
+                'store_id' => $storeId,
+        ];
+
+        $list = get_option('sender_customers_list');
+        if ($list) {
+            $cartData['list_id'] = $list;
+        }
+
+        $user = get_user_by('email', $cartData['email']);
+        if ($user) {
+            $cartData['customer_id'] = $user->ID;
+        }
+
+        update_post_meta($order->get_id(), Sender_Helper::SENDER_CART_DATA, $cartData);
+
+        return $cartData;
+    }
+
+    private function buildProductsPayload($order): array
+    {
+        $products = [];
+
+        foreach ($order->get_items() as $item) {
+            $variationId = $item->get_variation_id();
+            $productId = $variationId ?: $item->get_product_id();
+            $product = wc_get_product($productId);
+
+            if (!$product) {
+                continue;
+            }
+
+            $regularPrice = (float) $product->get_regular_price();
+            $salePrice = (float) $product->get_sale_price();
+            $price = $salePrice > 0 ? $salePrice : $regularPrice;
+            $discount = 0;
+            $oldPrice = null;
+
+            if ($salePrice > 0 && $salePrice < $regularPrice) {
+                $discount = round(100 - ($salePrice / $regularPrice * 100));
+                $oldPrice = $regularPrice;
+            }
+
+            if ($product->is_type('variation')) {
+                $sku = $product->get_sku();
+                if (!$sku) {
+                    $parentId = $product->get_parent_id();
+                    $parent = wc_get_product($parentId);
+                    $sku = $parent ? $parent->get_sku() : '';
+                }
+            } else {
+                $sku = $product->get_sku();
+            }
+
+            $payload = [
+                    'sku' => (string) $sku,
+                    'name' => (string) $product->get_title(),
+                    'price' => (string) $price,
+                    'qty' => (int) $item->get_quantity(),
+                    'image' => get_the_post_thumbnail_url($item->get_product_id()),
+                    'product_id' => $item->get_product_id(),
+            ];
+
+            if ($oldPrice !== null) {
+                $payload['old_price'] = (string) $oldPrice;
+                $payload['discount'] = (string) $discount;
+            }
+
+            $products[] = $payload;
+        }
+
+        return $products;
     }
 
     public function updateUserEmailMarketingConsent($email, $userId)
