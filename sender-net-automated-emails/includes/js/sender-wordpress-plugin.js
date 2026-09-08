@@ -4,7 +4,7 @@ jQuery(document).ready(function () {
         var emailField = jQuery(event.target);
         var emailValue = emailField.val();
         var newsletterChecked =
-            jQuery('input[name="sender_newsletter"]:checked').length > 0;
+            jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0;
 
         if (!emailValue || emailValue.indexOf('@') === -1) {
             return;
@@ -65,7 +65,8 @@ document.addEventListener('DOMContentLoaded', function () {
 // checkbox newsletter
 document.addEventListener('DOMContentLoaded', function () {
     document.body.addEventListener('change', function (event) {
-        if (event.target && event.target.id === 'sender_newsletter') {
+        if (event.target && (event.target.id === 'sender_newsletter' ||
+            event.target.id === 'sender-newsletter-checkbox-subscribe')) {
             handleNewsletterCheckboxChange(event.target.checked);
         }
     });
