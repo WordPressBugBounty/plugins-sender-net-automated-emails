@@ -746,3 +746,140 @@ label.sender-checkbox-label {
         min-width: 100%;
     }
 }
+
+/* Separate actions, progress and log downloads within the sync panel. */
+.sender-sync-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.sender-sync-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    max-width: 100%;
+}
+
+#sender-export-data .sender-sync-actions > input,
+#sender-export-data .sender-sync-actions > button {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    min-height: 40px;
+    height: auto;
+    margin: 0;
+    padding: 9px 16px;
+    font-size: 14px;
+    line-height: 20px;
+    white-space: nowrap;
+}
+
+#sender-export-data #sender-import-text {
+    width: 100%;
+    min-width: 0;
+    padding-left: 0;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.sender-debug-panel {
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.sender-sync-panel .sender-note,
+.sender-debug-panel .sender-note {
+    display: block;
+    max-width: none;
+    margin-left: 0;
+    text-align: start;
+}
+
+@media (max-width: 782px) {
+    .sender-box.sender-sync-panel,
+    .sender-box.sender-debug-panel {
+        padding: 20px;
+    }
+}
+
+/* Leave the sync panel visible below the fixed WordPress admin toolbar. */
+#sender-sync-panel {
+    scroll-margin-top: 64px;
+}
+
+#sender-sync-title {
+    margin: 0 0 20px;
+}
+
+#sender-import-status {
+    display: block;
+}
+
+.sender-sync-store-link {
+    display: inline-block;
+    margin-top: 6px;
+}
+
+.sender-sync-last-run {
+    display: block;
+    margin-top: 16px;
+}
+
+#sender-download-log {
+    margin-top: 24px;
+}
+
+.sender-sync-log-help {
+    margin: 0 0 12px;
+    line-height: 1.6;
+}
+
+/* Keep the current job status distinct from actions and previous sync details. */
+.sender-sync-status {
+    box-sizing: border-box;
+    width: 100%;
+    margin-bottom: 20px;
+    padding: 16px 20px;
+    border-left: 4px solid #2271b1;
+    border-radius: 4px;
+    background: #f0f6fc;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.sender-sync-status-title {
+    display: block;
+    margin-bottom: 4px;
+    color: #1d2327;
+}
+
+.sender-sync-status[data-status="completed"] {
+    border-left-color: #008a20;
+    background: #edfaef;
+}
+
+.sender-sync-status[data-status="cancelled"],
+.sender-sync-status[data-status="cancelling"],
+.sender-sync-status[data-status="unknown"] {
+    border-left-color: #996800;
+    background: #fcf9e8;
+}
+
+.sender-sync-status[data-status="failed"] {
+    border-left-color: #d63638;
+    background: #fcf0f1;
+}
+
+.sender-sync-auto-update {
+    display: none;
+    margin-top: 8px;
+    font-size: 13px;
+}
+
+.sender-sync-status[data-status="queued"] .sender-sync-auto-update,
+.sender-sync-status[data-status="running"] .sender-sync-auto-update,
+.sender-sync-status[data-status="cancelling"] .sender-sync-auto-update {
+    display: block;
+}

@@ -896,13 +896,37 @@ class Sender_Carts
 
     public function triggerEmailCheckout()
     {
-        if (!isset($_POST['email']) || empty($_POST['email'])) {
+        if (!isset($_POST['email']) || !is_string($_POST['email']) || empty($_POST['email'])) {
             return wp_send_json_error('Email is required');
         }
 
-        $sanitizedEmail = strtolower(sanitize_text_field($_POST['email']));
+        $sanitizedEmail = strtolower(sanitize_email(wp_unslash($_POST['email'])));
+        if (!is_email($sanitizedEmail)) {
+            return wp_send_json_error('A valid email is required');
+        }
+
+        $names = [];
+        foreach (['firstname', 'lastname'] as $field) {
+            if (isset($_POST[$field]) && is_string($_POST[$field])) {
+                $name = sanitize_text_field(wp_unslash($_POST[$field]));
+                if ($name !== '') {
+                    $names[$field] = $name;
+                }
+            }
+        }
         $senderUser = (new Sender_User())->findBy('email', $sanitizedEmail);
         if ($senderUser && !empty($senderUser->wp_user_id) && get_user_by('id', $senderUser->wp_user_id)) {
+            if ($names) {
+                $response = $this->sender->senderApi->senderTrackNotRegisteredUsers(
+                    array_merge([
+                        'email' => $sanitizedEmail,
+                        'customer_id' => $senderUser->wp_user_id,
+                    ], $names)
+                );
+                if (!$response || empty($response->subscriber_id)) {
+                    return wp_send_json_error('Subscriber not updated');
+                }
+            }
             $this->senderUserId = $senderUser->id;
 
             $cartUpdateResponse = $this->senderCartUpdated();
@@ -916,10 +940,10 @@ class Sender_Carts
         }
 
         $newsletter = isset($_POST['newsletter']) && (int) $_POST['newsletter'] === 1;
-        $trackNotRegisteredUserPayload = [
+        $trackNotRegisteredUserPayload = array_merge([
                 'email' => $sanitizedEmail,
                 'newsletter' => $newsletter
-        ];
+        ], $names);
         $response = $this->sender->senderApi->senderTrackNotRegisteredUsers($trackNotRegisteredUserPayload);
 
         if (!$response || !isset($response->subscriber_id) || empty($response->subscriber_id)) {
@@ -944,6 +968,7 @@ class Sender_Carts
             }
 
             //Old subscriber remove cart from previous one
+            $cart = null;
             if (isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
                 $currentUserSender = (new Sender_User())->findBy('sender_subscriber_id', $_COOKIE[self::SENDER_SUBSCRIBER_ID]);
                 if ($currentUserSender) {
@@ -1376,44 +1401,66 @@ class Sender_Carts
 
     public function senderRecoverCart($template)
     {
-        if (!isset($_GET['hash'])) {
+        if (!isset($_GET['hash']) || !is_string($_GET['hash'])) {
             return $template;
         }
 
-        $cartId = sanitize_text_field($_GET['hash']);
-
+        $cartId = sanitize_text_field(wp_unslash($_GET['hash']));
         $cart = (new Sender_Cart())->find($cartId);
-        if (!$cart || $cart->cart_recovered || $cart->cart_status == Sender_Helper::CONVERTED_CART) {
-            return wp_redirect(wc_get_cart_url());
+        if (!$cart || $cart->cart_status == Sender_Helper::CONVERTED_CART) {
+            wp_safe_redirect(wc_get_cart_url());
+            exit;
         }
+
+        $cartData = unserialize($cart->cart_data, ['allowed_classes' => false]);
+        $wc = $this->senderGetWoo();
+        if (!is_array($cartData) || !$cartData || !$wc || !$wc->cart || !$wc->session) {
+            return $template;
+        }
+
+        $wooCart = $wc->cart;
+        $restored = false;
+        foreach ($cartData as $product) {
+            if (!is_array($product) || empty($product['product_id']) || empty($product['quantity'])) {
+                continue;
+            }
+            $productId = (int) $product['product_id'];
+            $quantity = (int) $product['quantity'];
+            $variationId = (int) ($product['variation_id'] ?? 0);
+            $variation = (array) ($product['variation'] ?? []);
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            // Repeated clicks must not add the saved quantities again.
+            $key = $wooCart->find_product_in_cart($wooCart->generate_cart_id($productId, $variationId, $variation));
+            $existing = $key ? $wooCart->get_cart_item($key) : [];
+            $missing = max(0, $quantity - (int) ($existing['quantity'] ?? 0));
+            if ($missing === 0 || $wooCart->add_to_cart($productId, $missing, $variationId, $variation)) {
+                $restored = true;
+            }
+        }
+
+        if (!$restored) {
+            return $template;
+        }
+
+        $wooCart->calculate_totals();
+        (new WC_Cart_Session($wooCart))->set_session();
+        $wc->session->set(self::SENDER_ACTIVE_CART_SESSION_KEY, (int) $cart->id);
+        $wc->session->set_customer_session_cookie(true);
+        $wc->session->save_data();
 
         $cart->cart_recovered = '1';
         $cart->save();
 
-        $cartData = unserialize($cart->cart_data);
-
-        if (empty($cartData)) {
-            return $template;
-        }
-
-        $wooCart = new WC_Cart();
-
-        foreach ($cartData as $product) {
-            $wooCart->add_to_cart(
-                    (int)$product['product_id'],
-                    (int)$product['quantity'],
-                    (int)$product['variation_id'],
-                    $product['variation']
-            );
-        }
-
-        if (is_user_logged_in()){
+        if (is_user_logged_in()) {
             set_transient(Sender_Helper::TRANSIENT_RECOVER_CART, '1', 15);
         }
 
         setcookie('sender_recovered_cart', $cartId, time() + 3600, COOKIEPATH, COOKIE_DOMAIN);
-        new WC_Cart_Session($wooCart);
-        return wp_redirect(wc_get_cart_url());
+        wp_safe_redirect(wc_get_cart_url());
+        exit;
     }
 
     public function outputSenderTrackVisitorsScript()

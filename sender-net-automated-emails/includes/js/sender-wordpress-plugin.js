@@ -1,35 +1,69 @@
 //Checkout
 jQuery(document).ready(function () {
-    function handleEmailFieldChange(event) {
-        var emailField = jQuery(event.target);
-        var emailValue = emailField.val();
-        var newsletterChecked =
-            jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0;
+    var requestInFlight = false;
+    var capturePending = false;
+    var lastCaptured = '';
+    var emailSelector = 'input#email, input#billing_email';
+    var nameSelector = 'input#billing_first_name, input#billing_last_name, ' +
+        'input#billing-first_name, input#billing-last_name, ' +
+        'input#shipping-first_name, input#shipping-last_name';
 
+    function checkoutName(classicId, billingId, shippingId) {
+        var field = jQuery(classicId + ', ' + billingId).filter(':visible').first();
+        // Blocks uses the shipping address for billing when no separate billing form is shown.
+        if (!field.length) {
+            field = jQuery(shippingId).filter(':visible').first();
+        }
+        return field.val() || '';
+    }
+
+    function handleCheckoutFieldChange() {
+        if (requestInFlight) {
+            capturePending = true;
+            return;
+        }
+
+        var emailValue = jQuery(emailSelector).filter(':visible').first().val();
         if (!emailValue || emailValue.indexOf('@') === -1) {
             return;
         }
 
+        var data = {
+            action: 'trigger_backend_hook',
+            email: emailValue,
+            firstname: checkoutName('input#billing_first_name', 'input#billing-first_name', 'input#shipping-first_name'),
+            lastname: checkoutName('input#billing_last_name', 'input#billing-last_name', 'input#shipping-last_name'),
+            newsletter: jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0 ? 1 : 0
+        };
+        var captured = JSON.stringify(data);
+        if (captured === lastCaptured) {
+            return;
+        }
+
+        requestInFlight = true;
         jQuery.ajax({
             type: 'POST',
             url: senderAjax.ajaxUrl,
-            data: {
-                action: 'trigger_backend_hook',
-                email: emailValue,
-                newsletter: newsletterChecked ? 1 : 0
-            },
+            data: data,
             success: function (response) {
-                if (typeof sender === 'function') {
-                    sender('trackVisitors', {email: emailValue});
+                if (response.success) {
+                    lastCaptured = captured;
+                    if (typeof sender === 'function') {
+                        sender('trackVisitors', {email: emailValue});
+                    }
                 }
             },
-            error: function (textStatus, errorThrown) {
-                console.log("AJAX Error: " + textStatus + ", " + errorThrown);
+            complete: function () {
+                requestInFlight = false;
+                if (capturePending) {
+                    capturePending = false;
+                    handleCheckoutFieldChange();
+                }
             }
         });
     }
 
-    jQuery(document.body).on('change blur', 'input#email, input#billing_email', handleEmailFieldChange);
+    jQuery(document.body).on('change blur', emailSelector + ', ' + nameSelector, handleCheckoutFieldChange);
 });
 
 //TrackVisitor

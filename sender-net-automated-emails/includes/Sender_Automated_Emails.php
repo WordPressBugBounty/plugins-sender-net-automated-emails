@@ -490,6 +490,10 @@ class Sender_Automated_Emails
     public function senderInitStyles()
     {
         $version = $this->getVersionPlugin();
+        $stylesheetPath = plugin_dir_path($this->senderBaseFile) . 'styles/settings.css';
+        if (is_file($stylesheetPath)) {
+            $version .= '.' . filemtime($stylesheetPath);
+        }
         wp_enqueue_style('sender-styles', plugin_dir_url($this->senderBaseFile) . 'styles/settings.css', [], $version);
     }
 

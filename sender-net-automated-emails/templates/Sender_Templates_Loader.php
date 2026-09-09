@@ -13,6 +13,8 @@ class Sender_Templates_Loader
         $this->sender = $sender;
 
         add_action('wp_ajax_checkSyncStatus', [$this, 'checkSyncStatus']);
+        add_action('wp_ajax_sender_cancel_shop_sync', [$this, 'cancelShopSync']);
+        add_action('admin_post_sender_sync_log', [$this, 'downloadSyncLog']);
         add_action('admin_menu', [&$this, 'senderInitSidebar'], 2, 2);
         add_action('admin_post_sender_debug_download', [$this, 'downloadDebugFile']);
     }
@@ -125,13 +127,67 @@ class Sender_Templates_Loader
     }
 
     public function checkSyncStatus() {
-        $isRunning = get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-        $isFinished = get_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(null, 403);
+            return;
+        }
+        $state = Sender_Helper::getSyncState();
+        $response = [
+            'is_running' => in_array($state['status'], ['queued', 'running', 'cancelling'], true),
+            'job_id' => $state['job_id'] ?? '',
+            'is_finished' => $state['status'] === 'completed',
+            'status' => $state['status'],
+            'stage' => $state['stage'] ?? '',
+            'updated_at' => $state['updated_at'] ?? null,
+            'synced_at' => $state['status'] === 'completed'
+                ? ($state['synced_at'] ?? get_option('sender_synced_data_date', ''))
+                : get_option('sender_synced_data_date', ''),
+        ];
+        if ($state['status'] === 'queued') {
+            $response['sync_debug'] = Sender_Helper::getSyncDiagnostics($state);
+        }
+        wp_send_json_success($response);
+    }
 
-        wp_send_json_success([
-            'is_running' => (bool)$isRunning,
-            'is_finished' => (bool)$isFinished,
-        ]);
+    public function cancelShopSync()
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(null, 403);
+            return;
+        }
+        check_ajax_referer('sender_cancel_shop_sync', 'nonce');
+        $jobId = isset($_POST['job_id']) && is_string($_POST['job_id']) ? sanitize_text_field(wp_unslash($_POST['job_id'])) : '';
+        if (!Sender_Helper::cancelSyncJob($jobId)) {
+            wp_send_json_error(null, 409);
+            return;
+        }
+        $this->checkSyncStatus();
+    }
+
+    public function downloadSyncLog()
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Access denied.', '', ['response' => 403]);
+        }
+        check_admin_referer('sender_sync_log');
+        nocache_headers();
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Content-Disposition: attachment; filename="export-log.txt"');
+        $state = Sender_Helper::getSyncState();
+        echo 'Sync status: ' . $state['status'] . "\n";
+        echo 'Downloaded at (UTC): ' . gmdate('Y-m-d H:i:s') . "\n";
+        if ($state['status'] === 'queued' || ($state['status'] === 'cancelled' && empty($state['stage']))) {
+            echo wp_json_encode(Sender_Helper::getSyncDiagnostics($state), JSON_PRETTY_PRINT) . "\n";
+            echo "This job has not started. Any log below is from the previous export.\n";
+        }
+        $path = plugin_dir_path(__FILE__) . '../export-log.txt';
+        if (is_readable($path)) {
+            echo "\nLatest export log:\n";
+            readfile($path);
+        } else {
+            echo "No export log is available yet.\n";
+        }
+        exit;
     }
 
     public function downloadDebugFile()

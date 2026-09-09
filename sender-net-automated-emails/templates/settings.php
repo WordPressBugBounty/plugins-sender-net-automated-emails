@@ -3,7 +3,33 @@
     $mapping = (array)get_option('sender_role_group_map') ?: [];
     $mappingOn = (bool)get_option('sender_enable_role_group_mapping');
     $roles = get_editable_roles();
-    $logDownloadUrl = '';
+    $logDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_sync_log'), 'sender_sync_log');
+    $syncState = Sender_Helper::getSyncState();
+    $syncFailed = $syncState['status'] === 'failed';
+    $syncCancelMessage = $syncState['status'] === 'cancelling'
+        ? __('Cancelling sync. Waiting for the worker to stop before another sync can start.', 'sender-net-automated-emails')
+        : ($syncState['status'] === 'cancelled' ? __('Sync cancelled. Data already sent to Sender has been kept.', 'sender-net-automated-emails') : '');
+    $syncMessages = [
+        'queued' => __('Sync is queued and waiting to start.', 'sender-net-automated-emails'),
+        'starting' => __('Preparing your shop data for sync.', 'sender-net-automated-emails'),
+        'customers' => __('Syncing customers with Sender.', 'sender-net-automated-emails'),
+        'orders' => __('Syncing orders with Sender.', 'sender-net-automated-emails'),
+        'failed' => __('Sync stopped before completion. Check the sync log and try again.', 'sender-net-automated-emails'),
+        'completed' => __('Sync completed successfully.', 'sender-net-automated-emails'),
+        'unknown' => __('Sync completion could not be confirmed.', 'sender-net-automated-emails'),
+        'cancelling' => __('Cancelling sync. Waiting for the worker to stop before another sync can start.', 'sender-net-automated-emails'),
+        'cancelled' => __('Sync cancelled. Data already sent to Sender has been kept.', 'sender-net-automated-emails'),
+        'cancelFailed' => __('Could not request cancellation. Please try again.', 'sender-net-automated-emails'),
+    ];
+    $syncNoticeMessages = [
+        'queued' => __('Sync is queued.', 'sender-net-automated-emails'),
+        'running' => __('Sync is in progress.', 'sender-net-automated-emails'),
+        'cancelling' => __('Sync is being cancelled.', 'sender-net-automated-emails'),
+        'cancelled' => __('Sync was cancelled.', 'sender-net-automated-emails'),
+        'failed' => __('Sync needs attention.', 'sender-net-automated-emails'),
+        'completed' => __('Sync completed successfully.', 'sender-net-automated-emails'),
+        'unknown' => __('Sync needs attention.', 'sender-net-automated-emails'),
+    ];
 ?>
 
 <link rel="preconnect" href="https://fonts.gstatic.com">
@@ -12,15 +38,11 @@
     echo 'sender-single-column sender-d-flex';
 } ?>">
     <div class="sender-flex-column">
-        <?php if (get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) : ?>
-            <div id="sender-sync-notice" class="notice notice-info is-dismissible">
+        <?php if (Sender_Helper::isSyncRunning() || $syncFailed || $syncCancelMessage) : ?>
+            <div id="sender-sync-notice" class="notice <?php echo $syncFailed ? 'notice-error' : ($syncState['status'] === 'cancelled' ? 'notice-warning' : 'notice-info'); ?> is-dismissible">
                 <p>
-                    <strong>
-                        <?php _e('Synchronizing your shop data with Sender.', 'sender-net-automated-emails'); ?>
-                        <a href="https://app.sender.net/settings/connected-stores" target="_blank">
-                            <?php _e('See your store information', 'sender-net-automated-emails'); ?>
-                        </a>
-                    </strong>
+                    <strong class="sender-sync-notice-text"><?php echo esc_html($syncNoticeMessages[$syncState['status']] ?? $syncNoticeMessages['unknown']); ?></strong>
+                    <a href="#sender-sync-panel"><?php esc_html_e('View sync status', 'sender-net-automated-emails'); ?></a>
                 </p>
             </div>
         <?php endif; ?>
@@ -31,7 +53,7 @@
                   novalidate="novalidate">
                 <div class="sender-login-image">
                     <img src="<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/logo.svg'; ?>"
-                         class="sender-logo" alt="Sender logo">
+                         class="sender-logo" alt="<?php esc_attr_e('Sender logo', 'sender-net-automated-emails'); ?>">
                 </div>
 
                 <div class="sender-flex-center-column sender-h-100 sender-d-flex sender-flex-dir-column">
@@ -66,7 +88,7 @@
                 <div>
                     <div class="sender-mb-20">
                         <img src="<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/logo.svg'; ?>"
-                             class="sender-logo sender-small" alt="Sender logo">
+                             class="sender-logo sender-small" alt="<?php esc_attr_e('Sender logo', 'sender-net-automated-emails'); ?>">
                     </div>
 
                 </div>
@@ -256,7 +278,7 @@
                                                         <option value="0"><?php _e('Select role', 'sender-net-automated-emails'); ?></option>
                                                         <?php foreach ($roles as $slug => $info): ?>
                                                             <option value="<?php echo esc_attr($slug); ?>" <?php selected($roleSlug, $slug); ?>>
-                                                                <?php echo esc_html($info['name']); ?>
+                                                                <?php echo esc_html(translate_user_role($info['name'])); ?>
                                                             </option>
                                                         <?php endforeach; ?>
                                                     </select>
@@ -381,54 +403,61 @@
 
                 </div>
             </form>
-                <div class="sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between sender-mt-20">
+                <div id="sender-sync-panel" tabindex="-1" aria-labelledby="sender-sync-title" class="sender-sync-panel sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between sender-mt-20">
+                    <h3 id="sender-sync-title" class="sender-header"><?php esc_html_e('Sync with Sender', 'sender-net-automated-emails'); ?></h3>
                     <form method="post" class="sender-flex-dir-column sender-d-flex sender-h-100" action=''
                           id="sender-export-data">
                         <div class="sender-mb-20">
                             <?php
-                            $isSyncRunning = get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-                            if ($isSyncRunning) {
-                                $disableSubmit = 'disabled';
-                                $noticeMessage = esc_html__('A job is running to sync data with Sender application.', 'sender-net-automated-emails');
-                            } else {
-                                $disableSubmit = '';
-                                $noticeMessage = esc_html__('Import all subscribers, orders, and products from your WooCommerce store into your Sender account.', 'sender-net-automated-emails');
+                            $isSyncRunning = Sender_Helper::isSyncRunning();
+                            $disableSubmit = $isSyncRunning ? 'disabled' : '';
+                            $panelStatus = $syncState['status'];
+                            if ($panelStatus === 'unknown' && empty($syncState['job_id']) && !get_option('sender_synced_data_date')) {
+                                $panelStatus = 'idle';
                             }
+                            $noticeMessage = $panelStatus === 'running'
+                                ? ($syncMessages[$syncState['stage'] ?? ''] ?? $syncMessages['starting'])
+                                : ($syncMessages[$panelStatus] ?? __('Import all subscribers and orders from your WooCommerce store into your Sender account.', 'sender-net-automated-emails'));
                             ?>
                             <input name="sender_wocommerce_sync" type="hidden" id="sender_wocommerce_sync" value="0"
                                    class="sender-input sender-text-input sender-br-5">
-                            <div class="sender-btn-wrap sender-d-flex sender-flex-justify-start">
-                                <input type="submit" name="submit" id="sender-submit-sync"
-                                       class="sender-cta-button sender-medium sender-br-5 sender-height-fit"
-                                       value="<?php _e('Sync with Sender', 'sender-net-automated-emails') ?>" <?php echo $disableSubmit; ?>>
+                            <div id="sender-sync-status" class="sender-sync-status sender-default-text"
+                                 data-status="<?php echo esc_attr($panelStatus); ?>" role="status" aria-live="polite" aria-atomic="true">
+                                <strong class="sender-sync-status-title"><?php esc_html_e('Sync status', 'sender-net-automated-emails'); ?></strong>
+                                <span id="sender-import-status"><?php echo esc_html($noticeMessage); ?></span>
+                                <span class="sender-sync-auto-update"><?php esc_html_e('Status updates automatically, no refresh needed.', 'sender-net-automated-emails'); ?></span>
+                            </div>
+                            <div class="sender-sync-controls">
+                                <div class="sender-sync-actions">
+                                    <input type="submit" name="submit" id="sender-submit-sync"
+                                           class="sender-cta-button sender-medium sender-br-5 sender-height-fit"
+                                           value="<?php _e('Sync with Sender', 'sender-net-automated-emails') ?>" <?php echo $disableSubmit; ?>>
+                                    <?php if ($isSyncRunning) : ?>
+                                        <button type="button" id="sender-cancel-sync"
+                                                class="sender-secondary-button sender-medium sender-br-5"
+                                                <?php disabled($syncState['status'], 'cancelling'); ?>>
+                                            <?php esc_html_e('Cancel sync', 'sender-net-automated-emails'); ?>
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
                                 <div class="sender-default-text" id="sender-import-text">
-                                    <?php echo $noticeMessage; ?>
-                                    <a target="_blank" class="sender-link"
+                                    <a target="_blank" class="sender-link sender-sync-store-link"
                                        href="https://app.sender.net/settings/connected-stores"><?php _e('See your store information', 'sender-net-automated-emails') ?></a>
-                                    <span style="display: block"><?php _e('Last time synchronized:', 'sender-net-automated-emails') ?> <strong
-                                                style="display: block"><?php echo get_option('sender_synced_data_date'); ?></strong></span>
-                                    <br>
-                                    <span>When completed a debug information file would be available to download</span>
+                                    <span class="sender-sync-last-run"><?php _e('Last successful sync:', 'sender-net-automated-emails') ?> <strong
+                                                id="sender-last-synced" style="display: block"><?php echo esc_html(get_option('sender_synced_data_date')); ?></strong></span>
                                 </div>
                             </div>
 
-                            <!-- SYNC log file -->
-                            <?php
-                            $logFilePath = plugin_dir_path(__FILE__) . '../export-log.txt';
-                            $logDownloadUrl = plugins_url('export-log.txt', dirname(__FILE__));
-
-                            if (file_exists($logFilePath) && !get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) {
-                                ?>
-                                <div class="sender-option sender-mb-20 sender-mt-20">
-                                    <a href="<?php echo esc_url($logDownloadUrl); ?>"
-                                       class="sender-secondary-button sender-medium sender-br-5"
-                                       download>
-                                        <?php _e('Download Sync Log', 'sender-net-automated-emails'); ?>
-                                    </a>
-                                </div>
-                                <?php
-                            }
-                            ?>
+                            <div id="sender-download-log" class="sender-option sender-mb-20 sender-mt-20">
+                                <p class="sender-sync-log-help"><?php esc_html_e('Download the sync log to check progress or troubleshoot issues.', 'sender-net-automated-emails'); ?></p>
+                                <a href="<?php echo esc_url($logDownloadUrl); ?>"
+                                   class="sender-secondary-button sender-medium sender-br-5" download>
+                                    <?php _e('Download Sync Log', 'sender-net-automated-emails'); ?>
+                                </a>
+                            </div>
+                            <?php if ($isSyncRunning) : ?>
+                                <p class="sender-note"><?php esc_html_e('Cancellation stops remaining work. Data already sent to Sender is kept.', 'sender-net-automated-emails'); ?></p>
+                            <?php endif; ?>
 
                         </div>
                         <?php wp_nonce_field('sender_admin_referer'); ?>
@@ -443,17 +472,16 @@
                     </div>
                 </div>
 
-                <div class="sender-box sender-br-5 sender-mt-20 sender-p-20" style="width:50%!important">
-                    <h3 class="sender-header">Debug Information</h3>
+                <div class="sender-debug-panel sender-box sender-br-5 sender-mt-20 sender-p-20">
+                    <h3 class="sender-header"><?php esc_html_e('Debug Information', 'sender-net-automated-emails'); ?></h3>
 
                     <p class="sender-note" style="margin-bottom:12px;">
-                        If you contact Sender support, please download and attach the debug file below.
-                        It contains configuration details that help us diagnose issues quickly.
+                        <?php esc_html_e('If you contact Sender support, please download and attach the debug file below. It contains configuration details that help us diagnose issues quickly.', 'sender-net-automated-emails'); ?>
                     </p>
 
                     <a href="<?php echo admin_url('admin-post.php?action=sender_debug_download'); ?>"
                        class="sender-secondary-button sender-medium sender-br-5">
-                        Download Debug File
+                        <?php esc_html_e('Download Debug File', 'sender-net-automated-emails'); ?>
                     </a>
                 </div>
             <?php } else { ?>
@@ -541,6 +569,14 @@
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 
 <script>
+    const senderSettingsMessages = <?php echo wp_json_encode([
+        'required' => __('This field cannot be empty.', 'sender-net-automated-emails'),
+        'selectList' => __('Select a list', 'sender-net-automated-emails'),
+        'selectOption' => __('Select an option', 'sender-net-automated-emails'),
+        'selectRole' => __('Select role', 'sender-net-automated-emails'),
+        'selectGroup' => __('Select group', 'sender-net-automated-emails'),
+        'remove' => __('Remove', 'sender-net-automated-emails'),
+    ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     var checkboxEl = jQuery('#sender_allow_tracking');
     var checkboxLabel = jQuery('#sender_subscribe_label');
 
@@ -559,7 +595,7 @@
             if (textField.val().trim() === '') {
                 submitBtn.prop('disabled', true);
                 if (!textField.next('.sender-error-message').length) {
-                    textField.after('<div class="sender-error-message" style="color:#b41d1d!important;margin-bottom:10px;">This field cannot be empty.</div>');
+                    textField.after(jQuery('<div class="sender-error-message" style="color:#b41d1d!important;margin-bottom:10px;">').text(senderSettingsMessages.required));
                 }
             } else {
                 textField.next('.sender-error-message').remove();
@@ -635,7 +671,7 @@
     jQuery(document).ready(function () {
         if (jQuery.fn.select2) {
             jQuery('.select2-custom').select2({
-                placeholder: 'Select a list',
+                placeholder: senderSettingsMessages.selectList,
                 allowClear: true,
                 width: '50%',
             });
@@ -655,7 +691,7 @@
                     }
                 });
                 $repeaterWrap.find('select.select2-custom:not(:disabled)').select2({
-                    placeholder: 'Select an option',
+                    placeholder: senderSettingsMessages.selectOption,
                     allowClear: true,
                     width: '100%',
                 });
@@ -692,7 +728,7 @@
     jQuery(function ($) {
         const $repeater = $('#sender-role-group-repeater');
         const $roles = <?php echo json_encode(array_map(function ($role) {
-            return $role['name'];
+            return translate_user_role($role['name']);
         }, get_editable_roles())); ?>;
         const $groups = <?php echo json_encode($groups); ?>;
 
@@ -700,18 +736,18 @@
             const newRow = $('<div class="sender-role-group-row sender-d-flex sender-mb-10 sender-align-center">');
 
             const roleSelect = $('<select name="sender_role_group_map_roles[]" class="sender-br-5 select2-custom sender-role-select" style="width:45%">')
-                .append('<option value="0">Select role</option>');
+                .append($('<option>', {value: '0', text: senderSettingsMessages.selectRole}));
             $.each($roles, function (slug, label) {
                 roleSelect.append(`<option value="${slug}">${label}</option>`);
             });
 
             const groupSelect = $('<select name="sender_role_group_map_groups[]" class="sender-br-5 select2-custom sender-group-select" style="width:45%">')
-                .append('<option value="0">Select group</option>');
+                .append($('<option>', {value: '0', text: senderSettingsMessages.selectGroup}));
             $.each($groups, function (gid, gname) {
                 groupSelect.append(`<option value="${gid}">${gname}</option>`);
             });
 
-            const removeBtn = $('<button type="button" class="sender-remove-role-group sender-cta-button sender-small sender-br-5" style="margin-left:8px;">Remove</button>');
+            const removeBtn = $('<button type="button" class="sender-remove-role-group sender-cta-button sender-small sender-br-5" style="margin-left:8px;">').text(senderSettingsMessages.remove);
 
             newRow.append(roleSelect, groupSelect, removeBtn);
             $repeater.append(newRow);
@@ -750,64 +786,84 @@
         toggleCheckbox.addEventListener('change', toggleDependentSections);
     });
 
-    <?php if (get_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS)) : ?>
+    <?php if (Sender_Helper::isSyncRunning()) : ?>
     var ajaxurl = "<?php echo admin_url('admin-ajax.php'); ?>";
 
     (function pollSenderSyncStatus() {
-        const intervalId = setInterval(function () {
+        const syncMessages = <?php echo wp_json_encode($syncMessages, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const noticeMessages = <?php echo wp_json_encode($syncNoticeMessages, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        function updateSyncNotice(status) {
+            jQuery('#sender-sync-status').attr('data-status', status);
+            const noticeClass = status === 'completed' ? 'notice-success'
+                : (status === 'failed' ? 'notice-error'
+                    : (status === 'cancelled' || status === 'unknown' ? 'notice-warning' : 'notice-info'));
+            jQuery('#sender-sync-notice')
+                .removeClass('notice-info notice-warning notice-error notice-success')
+                .addClass(noticeClass)
+                .find('.sender-sync-notice-text').text(noticeMessages[status] || noticeMessages.unknown);
+        }
+        let stopped = false;
+        let currentJobId = <?php echo wp_json_encode($syncState['job_id'] ?? ''); ?>;
+        const cancelNonce = <?php echo wp_json_encode(wp_create_nonce('sender_cancel_shop_sync')); ?>;
+        function renderSyncStatus(response) {
+            if (stopped || !response || !response.success) return;
+            if (response.success) {
+                updateSyncNotice(response.data.status);
+                currentJobId = response.data.job_id || '';
+                jQuery('#sender-cancel-sync').prop('disabled', response.data.status === 'cancelling');
+                if (response.data.is_running) {
+                    const message = response.data.status === 'queued'
+                        ? syncMessages.queued
+                        : (response.data.status === 'cancelling' ? syncMessages.cancelling : (syncMessages[response.data.stage] || syncMessages.starting));
+                    if (message) {
+                        jQuery('#sender-import-status').text(message);
+                    }
+                }
+                if (response.data.status === 'failed' || response.data.status === 'cancelled') {
+                    const stoppedMessage = syncMessages[response.data.status];
+                    jQuery('#sender-cancel-sync').hide();
+                    jQuery('#sender-import-status').text(stoppedMessage);
+                    jQuery('#sender-submit-sync').prop('disabled', false);
+                    stopped = true;
+                    clearInterval(intervalId);
+                    return;
+                }
+                if (!response.data.is_running && !response.data.is_finished) {
+                    updateSyncNotice('unknown');
+                    jQuery('#sender-import-status').text(syncMessages.unknown);
+                    // A long import can outlive the progress transient. Keep polling
+                    // for its completion rather than offering a concurrent retry.
+                }
+                if (!response.data.is_running && response.data.is_finished) {
+                    jQuery('#sender-cancel-sync').hide();
+                    jQuery('#sender-import-status').text(syncMessages.completed);
+                    jQuery('#sender-last-synced').text(response.data.synced_at || '');
+                    jQuery('#sender-submit-sync').prop('disabled', false);
+
+                    stopped = true;
+                    clearInterval(intervalId);
+                }
+            }
+        }
+        jQuery('#sender-cancel-sync').on('click', function () {
+            jQuery(this).prop('disabled', true);
             jQuery.ajax({
                 url: ajaxurl,
                 method: 'POST',
-                data: {
-                    action: 'checkSyncStatus',
-                },
+                data: {action: 'sender_cancel_shop_sync', nonce: cancelNonce, job_id: currentJobId},
                 success: function (response) {
-                    if (response.success) {
-                        if (!response.data.is_running && response.data.is_finished) {
-                            const $existingNotice = jQuery('#sender-sync-notice');
-
-                            const successHTML = `
-                                <div id="sender-sync-notice" class="notice notice-success is-dismissible">
-                                    <p><strong>Sync completed successfully.</strong></p>
-                                    <button type="button" class="notice-dismiss">
-                                        <span class="screen-reader-text">Dismiss this notice.</span>
-                                    </button>
-                                </div>
-                            `;
-
-                            if ($existingNotice.length) {
-                                $existingNotice
-                                    .removeClass('notice-info')
-                                    .addClass('notice-success')
-                                    .html('<p><strong>Sync completed successfully.</strong></p><button type="button" class="notice-dismiss"><span class="screen-reader-text">Dismiss this notice.</span></button>');
-                            } else {
-                                jQuery('#sender-export-data').prepend(successHTML);
-                            }
-
-                            jQuery(document).on('click', '.notice.is-dismissible .notice-dismiss', function () {
-                                jQuery(this).closest('.notice').fadeOut();
-                            });
-
-                            jQuery('#sender-submit-sync').prop('disabled', false);
-
-                            if (!jQuery('#sender-download-log').length) {
-                                const logButtonHTML = `
-                                    <div id="sender-download-log" class="sender-option sender-mb-20">
-                                        <a href="<?php echo esc_url($logDownloadUrl); ?>"
-                                           class="sender-secondary-button sender-medium sender-br-5"
-                                           download>
-                                           <?php _e('Download Sync Log', 'sender-net-automated-emails'); ?>
-                                        </a>
-                                    </div>
-                                `;
-                                jQuery('#sender-export-data .sender-mb-20').last().append(logButtonHTML);
-                            }
-
-                            clearInterval(intervalId);
-                        }
-                    }
-                }
+                    if (response.success) renderSyncStatus(response);
+                    else cancelFailed();
+                },
+                error: cancelFailed
             });
+        });
+        function cancelFailed() {
+            jQuery('#sender-cancel-sync').prop('disabled', false);
+            jQuery('#sender-import-status').text(syncMessages.cancelFailed);
+        }
+        const intervalId = setInterval(function () {
+            jQuery.ajax({url: ajaxurl, method: 'POST', data: {action: 'checkSyncStatus'}, success: renderSyncStatus});
         }, 10000);
     })();
     <?php endif; ?>

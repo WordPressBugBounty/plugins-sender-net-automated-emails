@@ -48,6 +48,175 @@ class Sender_Helper
     const SENDER_JS_FILE_NAME = 'sender-wordpress-plugin';
     const TRANSIENT_SENDER_THANK_YOU = 'sender_thankyou_seen_';
 
+    const SYNC_STATE_OPTION = 'sender_sync_state';
+    const SYNC_WORKER_DEBUG_OPTION = 'sender_sync_worker_debug';
+    const SYNC_SCHEDULE_DEBUG_OPTION = 'sender_sync_schedule_debug';
+
+    public static function getSyncState(): array
+    {
+        $state = maybe_unserialize(self::getSyncStateValue());
+        if (is_array($state) && !empty($state['status'])) {
+            return $state;
+        }
+
+        // Compatibility with exports started before this update.
+        return [
+            'status' => get_transient(self::TRANSIENT_SYNC_IN_PROGRESS) ? 'running'
+                : ((get_option(self::TRANSIENT_SYNC_FINISHED, false) || get_transient(self::TRANSIENT_SYNC_FINISHED)) ? 'completed' : 'unknown'),
+            'stage' => '',
+        ];
+    }
+
+    private static function getSyncStateValue()
+    {
+        global $wpdb;
+        // Read the worker's latest state, including on sites with persistent object caches.
+        return $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+            self::SYNC_STATE_OPTION
+        ));
+    }
+
+    public static function queueSyncJob($delay, $existingOnly = false)
+    {
+        $previous = self::getSyncStateValue();
+        $state = maybe_unserialize($previous);
+        if ($existingOnly && (!is_array($state) || ($state['status'] ?? '') !== 'queued')) {
+            return false;
+        }
+        if (is_array($state) && in_array($state['status'] ?? '', ['running', 'cancelling'], true)) {
+            return false;
+        }
+        if (is_array($state) && ($state['status'] ?? '') === 'queued') {
+            return $state;
+        }
+        $state = [
+            'status' => 'queued',
+            'job_id' => wp_generate_uuid4(),
+            'stage' => '',
+            'not_before' => time() + max(0, (int) $delay),
+            'updated_at' => current_time('mysql'),
+        ];
+        if ($previous === null) {
+            return add_option(self::SYNC_STATE_OPTION, $state, '', false) ? $state : false;
+        }
+        return self::replaceSyncState($previous, $state) ? $state : false;
+    }
+
+    private static function replaceSyncState($previous, array $state): bool
+    {
+        global $wpdb;
+        $changed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND BINARY option_value = %s",
+            maybe_serialize($state), self::SYNC_STATE_OPTION, $previous
+        ));
+        if ($changed !== 1) {
+            return false;
+        }
+        wp_cache_delete(self::SYNC_STATE_OPTION, 'options');
+        return true;
+    }
+
+    public static function claimSyncJob(&$reason = null)
+    {
+        $previous = self::getSyncStateValue();
+        $state = maybe_unserialize($previous);
+        if (!is_array($state) || ($state['status'] ?? '') !== 'queued') {
+            $reason = 'state_not_queued';
+            return false;
+        }
+        if (($state['not_before'] ?? 0) > time()) {
+            $reason = 'not_due_yet';
+            return false;
+        }
+
+        $state['job_id'] = $state['job_id'] ?? wp_generate_uuid4();
+        $state['status'] = 'running';
+        $state['stage'] = 'starting';
+        $state['updated_at'] = current_time('mysql');
+        // Compare-and-swap: cron, multiple tabs, and AJAX must not start the same job twice.
+        $claimed = self::replaceSyncState($previous, $state);
+        global $wpdb;
+        $reason = $claimed ? 'claimed' : ($wpdb->last_error ? 'database_error' : 'state_changed');
+        return $claimed ? $state : false;
+    }
+
+    public static function cancelSyncJob($jobId): bool
+    {
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $previous = self::getSyncStateValue();
+            $state = maybe_unserialize($previous);
+            if (!is_array($state) || ($state['job_id'] ?? '') !== $jobId) {
+                return false;
+            }
+            if (in_array($state['status'], ['cancelled', 'cancelling'], true)) {
+                return true;
+            }
+            if (!in_array($state['status'], ['queued', 'running'], true)) {
+                return false;
+            }
+            if ($state['status'] === 'queued') {
+                // Clear before releasing the queued state, so a new sync's event
+                // cannot be removed by a late cancellation request.
+                wp_clear_scheduled_hook('sender_export_shop_data_cron');
+            }
+            $state['status'] = $state['status'] === 'queued' ? 'cancelled' : 'cancelling';
+            $state['updated_at'] = current_time('mysql');
+            if (self::replaceSyncState($previous, $state)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static function updateClaimedSyncJob(array $workerState): array
+    {
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            $previous = self::getSyncStateValue();
+            $state = maybe_unserialize($previous);
+            if (!is_array($state) || ($state['job_id'] ?? null) !== ($workerState['job_id'] ?? null)
+                || !in_array($state['status'], ['running', 'cancelling'], true)) {
+                throw new \RuntimeException('Sync worker no longer owns this job.', 499);
+            }
+            if ($state['status'] === 'cancelling') {
+                if (!in_array($workerState['status'], ['failed', 'cancelled'], true)) {
+                    throw new \RuntimeException('Sync cancellation requested.', 499);
+                }
+                $workerState['status'] = 'cancelled';
+            }
+            // Identical same-second heartbeats need no database write.
+            if (maybe_serialize($workerState) === $previous || self::replaceSyncState($previous, $workerState)) {
+                return $workerState;
+            }
+        }
+        throw new \RuntimeException('Unable to persist sync progress.');
+    }
+
+    public static function getSyncDiagnostics(array $state): array
+    {
+        $now = time();
+        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        $lock = get_transient('doing_cron');
+        return [
+            'checked_at_utc' => gmdate('Y-m-d H:i:s', $now),
+            'eligible_at_utc' => isset($state['not_before']) ? gmdate('Y-m-d H:i:s', $state['not_before']) : null,
+            'scheduled_at_utc' => $scheduled ? gmdate('Y-m-d H:i:s', $scheduled) : null,
+            'overdue_seconds' => $scheduled ? max(0, $now - $scheduled) : null,
+            'wp_cron_disabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
+            'alternate_wp_cron' => defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON,
+            'cron_lock_age_seconds' => is_numeric($lock) ? max(0, (int) floor(microtime(true) - (float) $lock)) : null,
+            'cron_lock_timeout_seconds' => defined('WP_CRON_LOCK_TIMEOUT') ? WP_CRON_LOCK_TIMEOUT : 60,
+            // This is the last callback attempt, possibly from an earlier sync.
+            'last_worker_attempt' => get_option(self::SYNC_WORKER_DEBUG_OPTION, null),
+            'last_schedule_attempt' => get_option(self::SYNC_SCHEDULE_DEBUG_OPTION, null),
+        ];
+    }
+
+    public static function isSyncRunning(): bool
+    {
+        return in_array(self::getSyncState()['status'], ['queued', 'running', 'cancelling'], true);
+    }
+
     public static function handleChannelStatus($sender_newsletter = null)
     {
         if (is_array($sender_newsletter) && isset($sender_newsletter['state'])) {

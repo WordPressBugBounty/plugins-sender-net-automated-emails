@@ -111,7 +111,7 @@ msgid "A job is running to sync data with Sender application."
 msgstr ""
 
 #: settings.php:225
-msgid "Import all subscribers, orders, and products from your WooCommerce store into your Sender account."
+msgid "Import all subscribers and orders from your WooCommerce store into your Sender account."
 msgstr ""
 
 #: settings.php:165
@@ -157,4 +157,242 @@ msgstr ""
 
 #: Sender_Woocommerce:110
 msgid "Subscribed to newsletter"
+msgstr ""
+
+#: templates/settings.php
+msgid "Syncing your shop data with Sender. Status updates automatically, no refresh needed."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync completed successfully."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync completion could not be confirmed."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync is no longer reporting progress. Completion could not be confirmed; check the sync log."
+msgstr ""
+
+#: templates/settings.php
+msgid "Dismiss this notice."
+msgstr ""
+
+#: templates/settings.php
+msgid "Download Sync Log"
+msgstr ""
+
+#: templates/settings.php
+msgid "Sender logo"
+msgstr ""
+
+#: templates/settings.php
+msgid "Tip:"
+msgstr ""
+
+#: templates/settings.php
+msgid "Enabling tracking allows the plugin to monitor customer activity such as cart behavior and checkout progress."
+msgstr ""
+
+#: templates/settings.php
+msgid "When enabled, new carts and subscriber profiles will be automatically created and updated in real time."
+msgstr ""
+
+#: templates/settings.php
+msgid "Assign registration group by user role"
+msgstr ""
+
+#: templates/settings.php
+msgid "WordPress includes built-in roles like <em>Administrator</em>, <em>Editor</em>, and <em>Subscriber</em>."
+msgstr ""
+
+#: templates/settings.php
+msgid "WooCommerce adds roles such as <em>Customer</em> and <em>Shop Manager</em>."
+msgstr ""
+
+#: templates/settings.php
+msgid "When this option is enabled, new users will automatically be assigned to a Sender group based on their role."
+msgstr ""
+
+#: templates/settings.php
+msgid "These role-to-group mappings will also be used when exporting your store data to the Sender application."
+msgstr ""
+
+#: templates/settings.php
+msgid "Note: Enabling role-based group mapping will disable the \"Save New registrations to\" option, since both options cannot be active at the same time."
+msgstr ""
+
+#: templates/settings.php
+msgid "User Role"
+msgstr ""
+
+#: templates/settings.php
+msgid "Sender Group"
+msgstr ""
+
+#: templates/settings.php
+msgid "Select role"
+msgstr ""
+
+#: templates/settings.php
+msgid "Select group"
+msgstr ""
+
+#: templates/settings.php
+msgid "Remove"
+msgstr ""
+
+#: templates/settings.php
+msgid "No role mappings added yet. Click “Add Role Mapping” to create your first one."
+msgstr ""
+
+#: templates/settings.php
+msgid "Add Role Mapping"
+msgstr ""
+
+#: templates/settings.php
+msgid "Show subscription checkbox on checkout and registration pages"
+msgstr ""
+
+#: templates/settings.php
+msgid "When enabled, all new users — including those signing up or logging in via third-party plugins like <em>Nextend Social Login</em> — are automatically added to your selected Sender list or role-based group."
+msgstr ""
+
+#: templates/settings.php
+msgid "When disabled, no subscriber is created during registration or login, regardless of opt-in value."
+msgstr ""
+
+#: templates/settings.php
+msgid "Note: This only applies to users who register without adding items to their cart. Once a cart is created, Sender still adds the user with active transactional email status for automations like cart recovery and advance filters"
+msgstr ""
+
+#: templates/settings.php
+msgid "Pre-check subscription box on checkout and registration"
+msgstr ""
+
+#: templates/settings.php
+msgid "Requires \"Show subscription checkbox\" enabled."
+msgstr ""
+
+#: templates/settings.php
+msgid "Subscription checkbox label text"
+msgstr ""
+
+#: templates/settings.php
+msgid "e.g. Subscribe to our newsletter"
+msgstr ""
+
+#: templates/settings.php
+msgid "This text appears next to the subscription checkbox on checkout and registration pages. You can customize it to better match your brand voice."
+msgstr ""
+
+#: templates/settings.php
+msgid "Save Woocommerce settings"
+msgstr ""
+
+
+#: templates/settings.php
+msgid "Debug Information"
+msgstr ""
+
+#: templates/settings.php
+msgid "If you contact Sender support, please download and attach the debug file below. It contains configuration details that help us diagnose issues quickly."
+msgstr ""
+
+#: templates/settings.php
+msgid "Download Debug File"
+msgstr ""
+
+#: templates/settings.php
+msgid "This field cannot be empty."
+msgstr ""
+
+#: templates/settings.php
+msgid "Select an option"
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync is queued and waiting to start."
+msgstr ""
+
+#: templates/settings.php
+msgid "Preparing your shop data for sync."
+msgstr ""
+
+#: templates/settings.php
+msgid "Syncing customers with Sender."
+msgstr ""
+
+
+#: templates/settings.php
+msgid "Syncing orders with Sender."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync stopped before completion. Check the sync log and try again."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync could not start. Reload this page to try again."
+msgstr ""
+
+#: templates/settings.php
+msgid "Download the sync log to check progress or troubleshoot issues."
+msgstr ""
+
+#: templates/settings.php
+msgid "Cancel sync"
+msgstr ""
+
+#: templates/settings.php
+msgid "Cancelling sync. Waiting for the worker to stop before another sync can start."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync cancelled. Data already sent to Sender has been kept."
+msgstr ""
+
+#: templates/settings.php
+msgid "Could not request cancellation. Please try again."
+msgstr ""
+
+#: templates/settings.php
+msgid "Cancellation stops remaining work. Data already sent to Sender is kept."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync is queued."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync is in progress."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync is being cancelled."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync was cancelled."
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync needs attention."
+msgstr ""
+
+#: templates/settings.php
+msgid "View sync status"
+msgstr ""
+
+#: templates/settings.php
+msgid "Sync status"
+msgstr ""
+
+#: templates/settings.php
+msgid "Last successful sync:"
+msgstr ""
+
+#: templates/settings.php
+msgid "Status updates automatically, no refresh needed."
 msgstr ""

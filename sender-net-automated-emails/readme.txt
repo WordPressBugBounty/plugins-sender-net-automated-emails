@@ -2,9 +2,9 @@
 Contributors: sendernet
 Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
-Tested up to: 7.0.3
+Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.10.26
+Stable tag: 2.10.27
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -458,3 +458,5 @@ purchased
 * Fixed registered user export being blocked by the newsletter checkbox display setting.
 = 2.10.26 2026-09-08 =
 * Fixed newsletter checkbox handling in WooCommerce block checkout
+= 2.10.27 2026-09-09 =
+* Fixed checkout name capture, cart recovery, and sync status display.

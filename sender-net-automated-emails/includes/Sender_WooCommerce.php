@@ -10,6 +10,8 @@ class Sender_WooCommerce
 {
     private $sender;
     private $logFilePath;
+    private $syncActive = false;
+    private $syncState = [];
 
     public function __construct($sender, $update = false)
     {
@@ -25,6 +27,7 @@ class Sender_WooCommerce
 
         //Declare action for cron job to sync from webhook
         add_action('sender_schedule_sync_cron_job', [$this, 'scheduleSenderExportShopDataCronJob']);
+        add_action('init', [$this, 'repairQueuedSyncEvent']);
 
         //Get order counts data
         add_action('sender_get_customer_data', [$this, 'senderBuildOrdersMetaFields'], 10, 2);
@@ -62,17 +65,137 @@ class Sender_WooCommerce
 
     }
 
-    public function scheduleSenderExportShopDataCronJob($delay = 5)
+    public function scheduleSenderExportShopDataCronJob($delay = 5, $existingOnly = false)
     {
-        if (!wp_next_scheduled('sender_export_shop_data_cron')) {
-            set_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS, true, 300);
-            wp_schedule_single_event(time() + (int)$delay, 'sender_export_shop_data_cron');
+        $state = Sender_Helper::queueSyncJob($delay, $existingOnly);
+        if (!$state) {
+            return Sender_Helper::getSyncState()['status'] === 'running';
         }
+        if (wp_next_scheduled('sender_export_shop_data_cron')) {
+            return true;
+        }
+        delete_option(Sender_Helper::TRANSIENT_SYNC_FINISHED);
+        delete_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
+        $timestamp = max(time(), $state['not_before'] ?? 0);
+        $result = wp_schedule_single_event($timestamp, 'sender_export_shop_data_cron', [], true);
+        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        // Another request may have scheduled or claimed the event in the meantime.
+        $current = Sender_Helper::getSyncState();
+        $accepted = (bool) $scheduled || in_array($current['status'], ['running', 'completed'], true);
+        update_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, [
+            'attempted_at_utc' => gmdate('Y-m-d H:i:s'),
+            'attempted_at' => time(),
+            'eligible_at' => $state['not_before'] ?? null,
+            'requested_at_utc' => gmdate('Y-m-d H:i:s', $timestamp),
+            'result' => $accepted ? 'accepted' : 'failed',
+            'error_code' => $accepted ? null : (is_wp_error($result) ? $result->get_error_code()
+                : ($result ? 'event_not_found_after_scheduling' : 'scheduling_failed')),
+        ], false);
+        return $accepted;
+    }
+
+    public function repairQueuedSyncEvent()
+    {
+        // Cron removes a single event before calling its worker. Do not repair
+        // that normal transition from within the cron process itself.
+        if (defined('DOING_CRON') && DOING_CRON) {
+            return;
+        }
+        $state = Sender_Helper::getSyncState();
+        if ($state['status'] !== 'queued' || wp_next_scheduled('sender_export_shop_data_cron')) {
+            return;
+        }
+        $lastAttempt = get_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, []);
+        if (($lastAttempt['eligible_at'] ?? null) === ($state['not_before'] ?? null)
+            && time() - ($lastAttempt['attempted_at'] ?? 0) < 30) {
+            return;
+        }
+        // Preserve the queued job and its eligibility time; only restore its event.
+        $this->scheduleSenderExportShopDataCronJob(0, true);
+    }
+
+    private function updateSyncState($status, $stage = null)
+    {
+        $this->syncState['status'] = $status;
+        if ($stage !== null) {
+            $this->syncState['stage'] = $stage;
+        }
+        $this->syncState['updated_at'] = current_time('mysql');
+        $this->syncState = Sender_Helper::updateClaimedSyncJob($this->syncState);
     }
 
     public function senderExportShopDataCronJob()
     {
+        // Adopt a cron event scheduled by an older plugin version without durable state.
+        add_option(Sender_Helper::SYNC_STATE_OPTION, ['status' => 'queued'], '', false);
+        // Keep diagnostics separate from the state used to claim the job.
+        $attempt = [
+            'entered_at_utc' => gmdate('Y-m-d H:i:s'),
+            'source' => defined('DOING_CRON') && DOING_CRON ? 'wp_cron' : 'other',
+            'claim_result' => 'pending',
+        ];
+        update_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, $attempt, false);
+        $claimed = Sender_Helper::claimSyncJob($reason);
+        $attempt['claim_result'] = $reason;
+        update_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, $attempt, false);
+        if (!$claimed) {
+            return false;
+        }
+        $this->syncState = $claimed;
+        $this->syncActive = true;
+        register_shutdown_function(function () {
+            // Covers PHP fatal errors/timeouts and unexpected exit during export.
+            if ($this->syncActive) {
+                $this->finishStoppedSync('failed');
+            }
+        });
+
+        try {
+            // Remove any duplicate pending event before processing the claimed job.
+            wp_clear_scheduled_hook('sender_export_shop_data_cron');
+            return $this->runShopDataExport();
+        } catch (\Throwable $e) {
+            $this->finishStoppedSync($e->getCode() === 499 ? 'cancelled' : 'failed', $e->getMessage());
+            return false;
+        } finally {
+            $this->syncActive = false;
+        }
+    }
+
+    private function finishStoppedSync($status, $message = '')
+    {
+        $this->syncActive = false;
+        try {
+            $this->updateSyncState($status);
+        } catch (\Throwable $e) {
+            // A stale worker must not overwrite a newer job or its log.
+            return;
+        }
+        $this->logExportDebugInfo($this->syncState['status'] === 'cancelled' ? 'Cancelled' : 'Export Failed',
+            $message ?: 'Worker stopped before completion.');
+        delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
+    }
+
+    private function runShopDataExport()
+    {
         $this->logExportDebugInfo('Start', "Sender export data started");
+
+        $startedAt = time();
+        $diagnostics = Sender_Helper::getSyncDiagnostics($this->syncState);
+        $startDelay = isset($this->syncState['not_before'])
+            ? max(0, $startedAt - $this->syncState['not_before']) . 's' : 'unknown';
+        $this->logExportDebugInfo('Sync Timing', sprintf(
+            'Eligible at (UTC): %s | Started at (UTC): %s | Delay after eligibility: %s',
+            $diagnostics['eligible_at_utc'] ?? 'unknown', gmdate('Y-m-d H:i:s', $startedAt), $startDelay
+        ));
+        $this->logExportDebugInfo('Cron', sprintf(
+            'Worker: %s | Automatic WP-Cron disabled: %s | Alternate WP-Cron: %s | Lock age: %s | Lock timeout: %ss',
+            defined('DOING_CRON') && DOING_CRON ? 'wp_cron' : 'other',
+            $diagnostics['wp_cron_disabled'] ? 'yes' : 'no',
+            $diagnostics['alternate_wp_cron'] ? 'yes' : 'no',
+            $diagnostics['cron_lock_age_seconds'] === null ? 'none' : $diagnostics['cron_lock_age_seconds'] . 's',
+            $diagnostics['cron_lock_timeout_seconds']
+        ));
 
         $retryKey = 'sender_export_retry_count';
         $retry = (int) get_transient($retryKey);
@@ -90,6 +213,7 @@ class Sender_WooCommerce
 
                 delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
                 delete_transient($retryKey);
+                $this->updateSyncState('failed');
                 return;
             }
 
@@ -100,7 +224,10 @@ class Sender_WooCommerce
                     'WooCommerce not ready in cron — retry ' . ($retry + 1)
             );
 
-            wp_schedule_single_event(time() + 30, 'sender_export_shop_data_cron');
+            $this->syncState['not_before'] = time() + 30;
+            $this->updateSyncState('queued', 'starting');
+            $this->syncActive = false;
+            wp_schedule_single_event($this->syncState['not_before'], 'sender_export_shop_data_cron');
             return;
         }
 
@@ -124,15 +251,20 @@ class Sender_WooCommerce
                 "Orders in wpdb->posts: $sanityOrders | Products in wpdb->posts: $sanityProducts"
         );
 
+        $this->updateSyncState('running', 'customers');
         $this->exportCustomers();
-        $this->exportProducts();
+        $this->updateSyncState('running', 'orders');
         $this->exportOrders();
 
+        $this->syncState['synced_at'] = current_time('Y-m-d H:i:s');
+        $this->updateSyncState('completed');
+        $this->syncActive = false;
+        $this->logExportDebugInfo('Completed', 'Sender export finished successfully');
         update_option('sender_wocommerce_sync', true);
-        update_option('sender_synced_data_date', current_time('Y-m-d H:i:s'));
+        update_option('sender_synced_data_date', $this->syncState['synced_at']);
 
+        update_option(Sender_Helper::TRANSIENT_SYNC_FINISHED, true, false);
         delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-        set_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED, true, 30);
 
         return true;
     }
@@ -670,7 +802,16 @@ class Sender_WooCommerce
 
     private function checkRateLimitation()
     {
+        if ($this->syncActive) {
+            $state = Sender_Helper::getSyncState();
+            if (($state['job_id'] ?? null) !== ($this->syncState['job_id'] ?? null) || $state['status'] !== 'running') {
+                throw new \RuntimeException('Sync cancellation requested.', 499);
+            }
+        }
         while (get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) {
+            if ($this->syncActive) {
+                $this->updateSyncState('running');
+            }
             sleep(5);
         }
 
@@ -1281,6 +1422,9 @@ class Sender_WooCommerce
 
     private function logExportDebugInfo($step, $data)
     {
+        if ($this->syncActive) {
+            $this->updateSyncState('running');
+        }
         try {
             if (!is_writable(dirname($this->logFilePath))) {
                 error_log("[Sender Plugin] Log directory not writable.");

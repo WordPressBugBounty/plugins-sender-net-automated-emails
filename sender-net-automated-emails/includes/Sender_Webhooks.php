@@ -87,8 +87,24 @@ class Sender_Webhooks
 
     public function import_shop_data_callback()
     {
+        if (!has_action('sender_schedule_sync_cron_job')) {
+            return new WP_REST_Response(['error' => 'Shop sync handler is unavailable.'], 503);
+        }
+        $previousState = Sender_Helper::getSyncState();
+        if ($previousState['status'] === 'cancelling') {
+            return new WP_REST_Response(['error' => 'The previous sync is still stopping.'], 409);
+        }
         update_option('sender_wocommerce_sync', false);
-        do_action('sender_schedule_sync_cron_job');
+        // Pass the delay explicitly: do_action without arguments supplies an empty string.
+        do_action('sender_schedule_sync_cron_job', 5);
+
+        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        $state = Sender_Helper::getSyncState();
+        $completedNewJob = $state['status'] === 'completed' && $state !== $previousState;
+        if ($state['status'] !== 'running' && !$completedNewJob
+            && !($state['status'] === 'queued' && $scheduled)) {
+            return new WP_REST_Response(['error' => 'Shop sync could not be scheduled.'], 503);
+        }
 
         $response = ['message' => __('Started importing wordpress shop data')];
         return new WP_REST_Response($response, 200);
