@@ -6,6 +6,19 @@ if (!defined('ABSPATH')) {
 
 class Sender_Helper
 {
+    public static function submittedNewsletterConsent(): ?bool
+    {
+        if (!isset($_POST['sender_newsletter']) || !is_scalar($_POST['sender_newsletter'])) {
+            return null;
+        }
+        if ((string) $_POST['sender_newsletter'] === '1') {
+            return true;
+        }
+        // Classic checkout always posts a hidden zero, even for an untouched box.
+        return isset($_POST['sender_newsletter_changed']) && $_POST['sender_newsletter_changed'] === '1'
+            ? false : null;
+    }
+
     #Used for email_marketing_consent
     const SUBSCRIBED = 'subscribed';
     const UNSUBSCRIBED = 'unsubscribed';

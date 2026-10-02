@@ -2,6 +2,8 @@
 jQuery(document).ready(function () {
     var requestInFlight = false;
     var capturePending = false;
+    var newsletterPending = null;
+    var waitingForSender = false;
     var lastCaptured = '';
     var emailSelector = 'input#email, input#billing_email';
     var nameSelector = 'input#billing_first_name, input#billing_last_name, ' +
@@ -18,10 +20,21 @@ jQuery(document).ready(function () {
     }
 
     function handleCheckoutFieldChange() {
+        capturePending = true;
+        processCheckoutRequests();
+    }
+
+    // Capture and explicit consent share one queue: an older capture must not
+    // finish after an opt-out and restore its stale newsletter=true value.
+    function processCheckoutRequests() {
         if (requestInFlight) {
-            capturePending = true;
             return;
         }
+        if (!capturePending) {
+            sendPendingNewsletter();
+            return;
+        }
+        capturePending = false;
 
         var emailValue = jQuery(emailSelector).filter(':visible').first().val();
         if (!emailValue || emailValue.indexOf('@') === -1) {
@@ -37,16 +50,19 @@ jQuery(document).ready(function () {
         };
         var captured = JSON.stringify(data);
         if (captured === lastCaptured) {
+            sendPendingNewsletter();
             return;
         }
 
         requestInFlight = true;
+        var captureSucceeded = false;
         jQuery.ajax({
             type: 'POST',
             url: senderAjax.ajaxUrl,
             data: data,
             success: function (response) {
                 if (response.success) {
+                    captureSucceeded = true;
                     lastCaptured = captured;
                     if (typeof sender === 'function') {
                         sender('trackVisitors', {email: emailValue});
@@ -55,54 +71,104 @@ jQuery(document).ready(function () {
             },
             complete: function () {
                 requestInFlight = false;
-                if (capturePending) {
-                    capturePending = false;
-                    handleCheckoutFieldChange();
+                // Do not update a subscriber whose creation failed. Keep the
+                // choice for a later field/checkbox interaction to retry.
+                if (captureSucceeded || capturePending) {
+                    processCheckoutRequests();
                 }
             }
         });
     }
 
+    function sendPendingNewsletter() {
+        var email = jQuery(emailSelector).filter(':visible').first().val();
+        if (newsletterPending === null || !email || email.indexOf('@') === -1) {
+            return;
+        }
+        if (typeof sender !== 'function') {
+            return;
+        }
+        // The bootstrap command collector returns no promise. Keep the latest
+        // choice locally until the SDK can acknowledge the actual request.
+        if (!sender.loaded) {
+            if (!waitingForSender) {
+                waitingForSender = true;
+                sender.listeners = sender.listeners || {};
+                sender.listeners.ready = sender.listeners.ready || [];
+                sender.listeners.ready.push(function () {
+                    waitingForSender = false;
+                    processCheckoutRequests();
+                });
+            }
+            return;
+        }
+        var choice = newsletterPending;
+        newsletterPending = null;
+        requestInFlight = true;
+        // Start inside a promise to release the queue even if the SDK throws.
+        Promise.resolve().then(function () {
+            return sender('subscribeNewsletter', {
+                newsletter: choice, email: email, store_id: window.senderNewsletter.storeId
+            });
+        }).then(function () {
+            requestInFlight = false;
+            processCheckoutRequests();
+        }, function () {
+            requestInFlight = false;
+            if (newsletterPending === null) {
+                newsletterPending = choice;
+            }
+            // Retry only on a newer interaction, never in a tight error loop.
+            if (capturePending) {
+                processCheckoutRequests();
+            }
+        });
+    }
+
     jQuery(document.body).on('change blur', emailSelector + ', ' + nameSelector, handleCheckoutFieldChange);
-});
 
-//TrackVisitor
-function handleTrackVisitorData(senderData) {
-    if (senderData) {
-        sender('trackVisitors', (senderData));
-    }
-}
-
-//Checkbox
-function handleNewsletterCheckboxChange(checked) {
-    var emailField = jQuery('input#email, input#billing_email');
-    var email = emailField.val();
-
-    if (!email) {
-        return;
-    }
-    handleCheckboxChange(checked, email, window.senderNewsletter.storeId);
-}
-
-function handleCheckboxChange(isChecked, email, storeId) {
-    const senderData = {newsletter: isChecked, email: email, store_id: storeId};
-
-    sender('subscribeNewsletter', senderData);
-}
-
-document.addEventListener('DOMContentLoaded', function () {
-    if (typeof senderTrackVisitorData !== 'undefined') {
-        handleTrackVisitorData(senderTrackVisitorData);
-    }
-});
-
-// checkbox newsletter
-document.addEventListener('DOMContentLoaded', function () {
+    var lastNewsletterChoice = null;
+    // WooCommerce replaces the payment section (including these inputs) during
+    // checkout refreshes. Keep the customer's choice across that replacement.
+    jQuery(document.body).on('updated_checkout', function () {
+        if (lastNewsletterChoice === null) {
+            return;
+        }
+        document.querySelectorAll('input[type="checkbox"][name="sender_newsletter"]').forEach(function (checkbox) {
+            checkbox.checked = lastNewsletterChoice;
+            var form = checkbox.closest('form');
+            var changed = form && form.querySelector('input[name="sender_newsletter_changed"]');
+            if (changed) {
+                changed.value = '1';
+            }
+        });
+    });
     document.body.addEventListener('change', function (event) {
         if (event.target && (event.target.id === 'sender_newsletter' ||
             event.target.id === 'sender-newsletter-checkbox-subscribe')) {
-            handleNewsletterCheckboxChange(event.target.checked);
+            if (event.target.type !== 'checkbox') {
+                return;
+            }
+            lastNewsletterChoice = event.target.checked;
+            // Preserve intent on classic checkout/account submission. A default
+            // hidden zero alone must not unsubscribe a Sender form subscriber.
+            var form = event.target.closest('form');
+            if (form) {
+                var changed = form.querySelector('input[name="sender_newsletter_changed"]');
+                if (changed) {
+                    changed.value = '1';
+                }
+            }
+            newsletterPending = event.target.checked;
+            handleCheckoutFieldChange();
         }
     });
 
+});
+
+//TrackVisitor
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof senderTrackVisitorData !== 'undefined' && senderTrackVisitorData) {
+        sender('trackVisitors', senderTrackVisitorData);
+    }
 });

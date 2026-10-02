@@ -200,7 +200,14 @@ class Sender_API
                 $data['list_id'] = $list;
             }
 
-            if ($emailConsent = get_user_meta($userId, Sender_Helper::EMAIL_MARKETING_META_KEY, true)) {
+            if ((int) $userId === get_current_user_id() && isset($_POST['sender_newsletter'])) {
+                // A callback can still carry older consent while checkout is running.
+                // Never let it override this customer's explicitly submitted choice.
+                $newsletter = Sender_Helper::submittedNewsletterConsent();
+                if ($newsletter !== null) {
+                    $data['newsletter'] = $newsletter;
+                }
+            } elseif ($emailConsent = get_user_meta($userId, Sender_Helper::EMAIL_MARKETING_META_KEY, true)) {
                 if (isset($emailConsent['state']) && $emailConsent['state'] === Sender_Helper::SUBSCRIBED) {
                     $data['newsletter'] = true;
                 }
@@ -289,7 +296,7 @@ class Sender_API
 
     private function senderBuildStatsResponse($response)
     {
-        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) != 200) {
+        if (is_wp_error($response) || !in_array(wp_remote_retrieve_response_code($response), [200, 201], true)) {
             return false;
         }
 
@@ -407,7 +414,8 @@ class Sender_API
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartData)]);
         $response = $this->sender_remote_post($url, $params);
 
-        return $this->senderBuildStatsResponse($response);
+        $result = $this->senderBuildStatsResponse($response);
+        return is_object($result) && isset($result->success) && $result->success === true;
     }
 
     public function senderUpdateCartStatus($cartId, $cartStatusData)

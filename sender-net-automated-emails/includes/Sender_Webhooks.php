@@ -137,6 +137,7 @@ class Sender_Webhooks
         foreach ($meta_fields as $field) {
             if ($field === Sender_Helper::EMAIL_MARKETING_META_KEY) {
                 if (isset($data['email_marketing_consent']['state'])) {
+                    update_user_meta($customer_id, Sender_Helper::EMAIL_MARKETING_META_KEY, $data['email_marketing_consent']);
                     update_user_meta($customer_id, 'sender_newsletter', $this->sender_email_status_as_boolean($data['email_marketing_consent']['state']));
                 }
                 continue;
@@ -161,18 +162,24 @@ class Sender_Webhooks
         $customer = get_user_by('email', $customer_email);
 
         if (!$customer) {
-            global $wpdb;
-            $order = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$wpdb->prefix}posts WHERE post_type = 'shop_order' AND ID IN (SELECT post_id FROM {$wpdb->prefix}postmeta WHERE meta_key = '_billing_email' AND meta_value = %s)", $customer_email));
+            $orders = function_exists('wc_get_orders') ? wc_get_orders([
+                'billing_email' => $customer_email, 'type' => 'shop_order',
+                'limit' => 1, 'orderby' => 'ID', 'order' => 'DESC',
+            ]) : [];
+            $order = $orders ? reset($orders) : false;
             if (!$order) return new WP_REST_Response(['error' => 'Customer not found'], 404);
-            update_post_meta($order->ID, '_billing_first_name', sanitize_text_field($data['first_name'] ?? ''));
-            update_post_meta($order->ID, '_billing_last_name', sanitize_text_field($data['last_name'] ?? ''));
-            update_post_meta($order->ID, '_billing_phone', sanitize_text_field($data['phone'] ?? ''));
-            update_post_meta($order->ID, Sender_Helper::EMAIL_MARKETING_META_KEY, $data[Sender_Helper::EMAIL_MARKETING_META_KEY] ?? '');
+            foreach (['first_name', 'last_name', 'phone'] as $field) {
+                if (isset($data[$field])) {
+                    $order->{'set_billing_' . $field}(sanitize_text_field($data[$field]));
+                }
+            }
+            if (isset($data[Sender_Helper::EMAIL_MARKETING_META_KEY])) {
+                $order->update_meta_data(Sender_Helper::EMAIL_MARKETING_META_KEY, $data[Sender_Helper::EMAIL_MARKETING_META_KEY]);
+            }
+            $order->save();
         } else {
-            update_user_meta($customer->ID, 'first_name', sanitize_text_field($data['first_name'] ?? ''));
-            update_user_meta($customer->ID, 'last_name', sanitize_text_field($data['last_name'] ?? ''));
-            update_user_meta($customer->ID, 'phone', sanitize_text_field($data['phone'] ?? ''));
-            update_user_meta($customer->ID, Sender_Helper::EMAIL_MARKETING_META_KEY, $data[Sender_Helper::EMAIL_MARKETING_META_KEY] ?? '');
+            $data['id'] = $customer->ID;
+            return $this->update_customer_by_id($data);
         }
 
         $response = ['message' => __('Customer information updated.')];

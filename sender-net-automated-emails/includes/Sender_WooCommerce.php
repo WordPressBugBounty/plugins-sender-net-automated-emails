@@ -802,20 +802,21 @@ class Sender_WooCommerce
 
     private function checkRateLimitation()
     {
-        if ($this->syncActive) {
-            $state = Sender_Helper::getSyncState();
-            if (($state['job_id'] ?? null) !== ($this->syncState['job_id'] ?? null) || $state['status'] !== 'running') {
-                throw new \RuntimeException('Sync cancellation requested.', 499);
+        while (true) {
+            if ($this->syncActive) {
+                $state = Sender_Helper::getSyncState();
+                if (($state['job_id'] ?? null) !== ($this->syncState['job_id'] ?? null) || $state['status'] !== 'running') {
+                    throw new \RuntimeException('Sync cancellation requested.', 499);
+                }
             }
-        }
-        while (get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) {
+            if (!get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) {
+                return true;
+            }
             if ($this->syncActive) {
                 $this->updateSyncState('running');
             }
             sleep(5);
         }
-
-        return true;
     }
 
     public function sendWoocommerceCustomersToSender($customers, $list = null)
@@ -849,7 +850,7 @@ class Sender_WooCommerce
         }
 
         $this->checkRateLimitation();
-        $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
+        $this->exportBatch(['customers' => $customersExportData]);
     }
 
     public function senderUpdateCustomerData($email): bool
@@ -987,7 +988,7 @@ class Sender_WooCommerce
 
         if (!empty($customersExportData)) {
             $this->checkRateLimitation();
-            $this->sender->senderApi->senderExportData(['customers' => $customersExportData]);
+            $this->exportBatch(['customers' => $customersExportData]);
         }
     }
 
@@ -1099,58 +1100,59 @@ class Sender_WooCommerce
         }
     }
 
+    private function exportBatch(array $data)
+    {
+        $retries = 0;
+        do {
+            $this->checkRateLimitation();
+            $response = $this->sender->senderApi->senderExportData($data);
+            if (!is_object($response) || empty($response->xRate)) {
+                break;
+            }
+            // Retry this exact batch after the API's cooldown; never advance past it.
+            if ($retries++ >= 3) {
+                throw new RuntimeException('Sender rate limit persisted after three retries. Please retry the sync.');
+            }
+        } while (true);
+        if (!is_object($response) || !isset($response->success) || $response->success !== true) {
+            throw new RuntimeException('Sender rejected the export batch. Please retry the sync.');
+        }
+        return $response;
+    }
+
     public function exportOrders()
     {
-        global $wpdb;
-        $totalOrders = $wpdb->get_var(
-                "SELECT COUNT(*)
-             FROM {$wpdb->posts}
-             WHERE post_type = 'shop_order'
-               AND post_status NOT IN ('trash', 'auto-draft')"
-        );
-
-        $this->logExportDebugInfo('ExportOrders', "Total orders: $totalOrders");
-
-        $statuses = [
-                'wc-pending', 'wc-processing', 'wc-on-hold',
-                'wc-completed', 'wc-cancelled', 'wc-refunded',
-                'wc-failed'
-        ];
-
-        foreach ($statuses as $status) {
-            $count = $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type = 'shop_order' AND post_status = %s", $status
-            ));
-            $this->logExportDebugInfo('Order Status Count', "$status = $count");
-        }
-
         $chunkSize = 50;
         $ordersExported = 0;
-        $loopTimes = floor($totalOrders / $chunkSize);
-
-        for ($x = 0; $x <= $loopTimes; $x++) {
+        // Some extensions register a status without adding it to WooCommerce's list.
+        $statuses = array_values(array_diff(array_unique(array_merge(
+            get_post_stati(), array_keys(wc_get_order_statuses())
+        )), ['trash', 'auto-draft']));
+        do {
+            $this->checkRateLimitation();
             $ordersExportData = [];
-            $chunkedOrders = $wpdb->get_results(
-                    "SELECT *
-                     FROM {$wpdb->posts}
-                     WHERE post_type = 'shop_order'
-                       AND post_status NOT IN ('trash', 'auto-draft')
-                     LIMIT {$chunkSize}
-                     OFFSET {$ordersExported}"
-            );
-
-            $this->logExportDebugInfo('Export Chunk', "Offset: $ordersExported | Orders Fetched: " . count($chunkedOrders));
-
-            foreach ($chunkedOrders as $order) {
-                $remoteId = get_post_meta($order->ID, Sender_Helper::SENDER_CART_META, true);
+            // WooCommerce chooses the authoritative data store (classic or HPOS).
+            $chunkedOrders = wc_get_orders([
+                'type' => 'shop_order',
+                'status' => $statuses,
+                'limit' => $chunkSize,
+                'offset' => $ordersExported,
+                'orderby' => 'ID',
+                'order' => 'ASC',
+            ]);
+            if (!$chunkedOrders) {
+                break;
+            }
+            foreach ($chunkedOrders as $wcOrder) {
+                $remoteId = $wcOrder->get_meta(Sender_Helper::SENDER_CART_META, true);
                 if (!$remoteId) {
-                    $remoteId = get_post_meta($order->ID, '_order_key', true);
+                    $remoteId = $wcOrder->get_order_key();
                 }
 
-                $billingCountry   = get_post_meta($order->ID, '_billing_country', true);
-                $shippingCountry  = get_post_meta($order->ID, '_shipping_country', true);
-                $billingPhoneRaw  = get_post_meta($order->ID, '_billing_phone', true);
-                $shippingPhoneRaw = get_post_meta($order->ID, '_shipping_phone', true);
+                $billingCountry   = $wcOrder->get_billing_country();
+                $shippingCountry  = $wcOrder->get_shipping_country();
+                $billingPhoneRaw  = $wcOrder->get_billing_phone();
+                $shippingPhoneRaw = $wcOrder->get_shipping_phone();
 
                 $billingPhoneNormalized  = $this->normalizePhoneE164($billingPhoneRaw,  $billingCountry);
                 $billingPhoneNormalized  = $billingPhoneNormalized !== '' ? $billingPhoneNormalized : null;
@@ -1158,21 +1160,20 @@ class Sender_WooCommerce
                 $shippingPhoneNormalized = $this->normalizePhoneE164($shippingPhoneRaw, $shippingCountry);
                 $shippingPhoneNormalized = $shippingPhoneNormalized !== '' ? $shippingPhoneNormalized : null;
 
-                $wcOrder = wc_get_order($order->ID);
                 $customerIp = $wcOrder ? $wcOrder->get_customer_ip_address() : null;
                 $customerId = $wcOrder ? (int) ($wcOrder->get_customer_id() ?: $wcOrder->get_user_id()) : 0;
 
                 $orderData = [
-                        'status' => $order->post_status,
-                        'updated_at' => $order->post_modified,
-                        'created_at' => $order->post_date,
+                        'status' => 'wc-' . $wcOrder->get_status(),
+                        'updated_at' => $wcOrder->get_date_modified() ? $wcOrder->get_date_modified()->date('Y-m-d H:i:s') : null,
+                        'created_at' => $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
                         'remoteId' => $remoteId,
-                        'name' => $order->post_name,
-                        'currency' => get_woocommerce_currency(),
+                        'name' => (string) $wcOrder->get_order_number(),
+                        'currency' => $wcOrder->get_currency(),
                         'orderId' => $wcOrder ? (string) $wcOrder->get_order_number() : '',
-                        'email' => get_post_meta($order->ID, '_billing_email', true),
-                        'firstname' => get_post_meta($order->ID, '_billing_first_name', true),
-                        'lastname' => get_post_meta($order->ID, '_billing_last_name', true),
+                        'email' => $wcOrder->get_billing_email(),
+                        'firstname' => $wcOrder->get_billing_first_name(),
+                        'lastname' => $wcOrder->get_billing_last_name(),
                 ];
 
                 // only add if valid WP user is linked
@@ -1184,28 +1185,28 @@ class Sender_WooCommerce
                     $orderData['phone'] = $billingPhoneNormalized;
                 }
 
-                $paymentMethod       = get_post_meta($order->ID, '_payment_method', true);
-                $paymentMethodTitle  = get_post_meta($order->ID, '_payment_method_title', true);
+                $paymentMethod       = $wcOrder->get_payment_method();
+                $paymentMethodTitle  = $wcOrder->get_payment_method_title();
 
                 $orderData['order_details'] = [
-                        'total'     => number_format((float) $wcOrder->get_total(), 2),
-                        'subtotal'  => number_format((float) $wcOrder->get_subtotal(), 2),
-                        'discount'  => number_format((float) $wcOrder->get_discount_total(), 2),
-                        'tax'       => number_format((float) $wcOrder->get_total_tax(), 2),
+                        'total'     => number_format((float) $wcOrder->get_total(), 2, '.', ''),
+                        'subtotal'  => number_format((float) $wcOrder->get_subtotal(), 2, '.', ''),
+                        'discount'  => number_format((float) $wcOrder->get_discount_total(), 2, '.', ''),
+                        'tax'       => number_format((float) $wcOrder->get_total_tax(), 2, '.', ''),
                         'order_date'=> $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
                 ];
 
                 $billing = [
-                        'first_name' => get_post_meta($order->ID, '_billing_first_name', true),
-                        'last_name'  => get_post_meta($order->ID, '_billing_last_name', true),
-                        'company'    => get_post_meta($order->ID, '_billing_company', true),
-                        'address_1'  => get_post_meta($order->ID, '_billing_address_1', true),
-                        'address_2'  => get_post_meta($order->ID, '_billing_address_2', true),
-                        'city'       => get_post_meta($order->ID, '_billing_city', true),
-                        'state'      => get_post_meta($order->ID, '_billing_state', true),
-                        'postcode'   => get_post_meta($order->ID, '_billing_postcode', true),
+                        'first_name' => $wcOrder->get_billing_first_name(),
+                        'last_name'  => $wcOrder->get_billing_last_name(),
+                        'company'    => $wcOrder->get_billing_company(),
+                        'address_1'  => $wcOrder->get_billing_address_1(),
+                        'address_2'  => $wcOrder->get_billing_address_2(),
+                        'city'       => $wcOrder->get_billing_city(),
+                        'state'      => $wcOrder->get_billing_state(),
+                        'postcode'   => $wcOrder->get_billing_postcode(),
                         'country'    => $billingCountry,
-                        'email'      => get_post_meta($order->ID, '_billing_email', true),
+                        'email'      => $wcOrder->get_billing_email(),
                         'phone'      => $billingPhoneNormalized,
                         'payment_method' => $paymentMethod,
                         'payment_method_title' => $paymentMethodTitle,
@@ -1216,14 +1217,14 @@ class Sender_WooCommerce
                 });
 
                 $shipping = [
-                        'first_name' => get_post_meta($order->ID, '_shipping_first_name', true),
-                        'last_name'  => get_post_meta($order->ID, '_shipping_last_name', true),
-                        'company'    => get_post_meta($order->ID, '_shipping_company', true),
-                        'address_1'  => get_post_meta($order->ID, '_shipping_address_1', true),
-                        'address_2'  => get_post_meta($order->ID, '_shipping_address_2', true),
-                        'city'       => get_post_meta($order->ID, '_shipping_city', true),
-                        'state'      => get_post_meta($order->ID, '_shipping_state', true),
-                        'postcode'   => get_post_meta($order->ID, '_shipping_postcode', true),
+                        'first_name' => $wcOrder->get_shipping_first_name(),
+                        'last_name'  => $wcOrder->get_shipping_last_name(),
+                        'company'    => $wcOrder->get_shipping_company(),
+                        'address_1'  => $wcOrder->get_shipping_address_1(),
+                        'address_2'  => $wcOrder->get_shipping_address_2(),
+                        'city'       => $wcOrder->get_shipping_city(),
+                        'state'      => $wcOrder->get_shipping_state(),
+                        'postcode'   => $wcOrder->get_shipping_postcode(),
                         'country'    => $shippingCountry,
                         'phone'      => $shippingPhoneNormalized,
                 ];
@@ -1238,77 +1239,39 @@ class Sender_WooCommerce
                     $orderData['shipping']['customer_ip'] = $customerIp;
                 }
 
-                $orderProductTable = $wpdb->prefix . 'wc_order_product_lookup';
-
-                $productsData = $wpdb->get_results(
-                        $wpdb->prepare(
-                                "SELECT *
-                                 FROM {$orderProductTable}
-                                 WHERE order_id = %d",
-                                $order->ID
-                        )
-                );
-
                 $orderData['products'] = [];
                 $orderPrice = 0;
-                foreach ($productsData as $key => $product) {
-                    $wcProduct = wc_get_product($product->variation_id ?: $product->product_id);
-
-                    if ($wcProduct) {
-                        $regularPrice = (float) $wcProduct->get_regular_price();
-                        $salePrice = (float) $wcProduct->get_sale_price();
-
-                        $price = $salePrice > 0 ? $salePrice : $regularPrice;
-                        $discount = 0;
-                        $oldPrice = null;
-
-                        if ($salePrice > 0 && $salePrice < $regularPrice) {
-                            $discount = round(100 - ($salePrice / $regularPrice * 100));
-                            $oldPrice = $regularPrice;
-                        }
-
-                        $orderPrice += $price * $product->product_qty;
-
-                        $sku = $wcProduct->get_sku();
-
-                        if (!$sku && $wcProduct->is_type('variation')) {
-                            $parent = wc_get_product($wcProduct->get_parent_id());
-                            if ($parent) {
-                                $sku = $parent->get_sku();
-                            }
-                        }
-
-                        $productData = [
-                                'product_id' => $wcProduct->get_id(),
-                                'sku' => $sku ?: null,
-                                'name' => $wcProduct->get_name(),
-                                'price' => (string) $price,
-                                'qty' => $product->product_qty,
-                                'currency' => get_woocommerce_currency(),
-                                'image' => get_the_post_thumbnail_url($product->product_id),
-                        ];
-
-                        if ($oldPrice !== null) {
-                            $productData['old_price'] = (string) $oldPrice;
-                            $productData['discount']  = (string) $discount;
-                        }
-
-                        $orderData['products'][$key] = $productData;
-
-                    } else {
-                        $orderData['products'][$key] = [
-                                'product_id' => $product->ID,
-                                'sku' => $product->sku,
-                                'name' => $product->post_title,
-                                'price' => $product->max_price,
-                                'qty' => $product->product_qty,
-                                'discount' => '0',
-                                'currency' => get_woocommerce_currency(),
-                                'image' => get_the_post_thumbnail_url($product->product_id),
-                        ];
-
-                        $orderPrice += $product->max_price * $product->product_qty;
+                foreach ($wcOrder->get_items('line_item') as $item) {
+                    // Woo's item setters reject IDs of deleted products on read;
+                    // their original references remain in order-item metadata.
+                    $productId = $item->get_product_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_product_id', true);
+                    $variationId = $item->get_variation_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_variation_id', true);
+                    $product = wc_get_product($variationId ?: $productId);
+                    $quantity = (float) $item->get_quantity();
+                    // Order lines preserve the purchased price even after catalog edits
+                    // or product deletion. Their totals already include coupon discounts.
+                    $price = $quantity > 0 ? (float) $item->get_total() / $quantity : 0;
+                    $oldPrice = $quantity > 0 ? (float) $item->get_subtotal() / $quantity : 0;
+                    $sku = $product ? $product->get_sku() : '';
+                    if (!$sku && $product && $product->is_type('variation')) {
+                        $parent = wc_get_product($product->get_parent_id());
+                        $sku = $parent ? $parent->get_sku() : '';
                     }
+                    $productData = [
+                        'product_id' => $variationId ?: $productId,
+                        'sku' => $sku ?: null,
+                        'name' => $item->get_name(),
+                        'price' => (string) $price,
+                        'qty' => $item->get_quantity(),
+                        'currency' => $wcOrder->get_currency(),
+                        'image' => $productId ? get_the_post_thumbnail_url($productId) : false,
+                    ];
+                    if ($oldPrice > 0 && $price < $oldPrice) {
+                        $productData['old_price'] = (string) $oldPrice;
+                        $productData['discount'] = (string) round(100 - $price / $oldPrice * 100);
+                    }
+                    $orderData['products'][] = $productData;
+                    $orderPrice += (float) $item->get_total();
                 }
 
                 $orderData['price'] = $orderPrice;
@@ -1316,9 +1279,9 @@ class Sender_WooCommerce
             }
 
             $this->checkRateLimitation();
-            $this->sender->senderApi->senderExportData(['orders' => $ordersExportData]);
-            $ordersExported += $chunkSize;
-        }
+            $this->exportBatch(['orders' => $ordersExportData]);
+            $ordersExported += count($chunkedOrders);
+        } while (count($chunkedOrders) === $chunkSize);
     }
 
     public function senderProcessOrderFromWoocommerceDashboard($orderId, $senderUser)
