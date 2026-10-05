@@ -24,6 +24,9 @@ class Sender_Carts
 
     const SENDER_SUBSCRIBER_ID = 'sender_subscriber_id';
     const SENDER_ACTIVE_CART_SESSION_KEY = 'sender_active_cart_id';
+    const NEWSLETTER_CHECKBOX_ID = 'sender-newsletter-checkbox-subscribe';
+    const NEWSLETTER_BLOCK_NAME = 'sender-net-automated-emails/subscribe-newsletter-block';
+    const CHECKOUT_CONTACT_BLOCK_NAME = 'woocommerce/checkout-contact-information-block';
 
     public function __construct($sender)
     {
@@ -70,6 +73,7 @@ class Sender_Carts
         //Subscribe to newsletter block checkout page
         add_action('wp_enqueue_scripts', [$this, 'senderSubscribeNewsletterBlockEnqueueAssets']);
         add_action('enqueue_block_editor_assets', [$this, 'senderSubscribeNewsletterBlockEnqueueAssets']);
+        add_filter('render_block', [$this, 'senderRenderCheckoutNewsletter'], 10, 2);
 
         //Capture email when filling checkout details
         add_action('wp_ajax_trigger_backend_hook', [$this,'triggerEmailCheckout']);
@@ -1508,6 +1512,49 @@ class Sender_Carts
                 delete_transient(Sender_Helper::TRANSIENT_RECOVER_CART);
             }
         }
+    }
+
+    /**
+     * Classic checkout has a template hook; Blocks needs content inside its
+     * Contact Information block. Render from current settings without rewriting
+     * the page or changing the legacy Gutenberg save format.
+     */
+    public function senderRenderCheckoutNewsletter($content, $block)
+    {
+        $name = $block['blockName'] ?? '';
+        if ($name !== self::NEWSLETTER_BLOCK_NAME
+                && $name !== self::CHECKOUT_CONTACT_BLOCK_NAME) {
+            return $content;
+        }
+
+        $label = $this->senderSubscribeNewsletterText();
+        $newsletter = '';
+        if ($label !== null && $label !== '') {
+            $checkboxId = self::NEWSLETTER_CHECKBOX_ID;
+            $checked = (bool) get_option('sender_checkbox_newsletter_on_checkout');
+            ob_start();
+            include __DIR__ . '/../templates/checkout-newsletter-block.php';
+            $newsletter = ob_get_clean();
+        }
+
+        // Refresh existing saved Sender blocks, including hiding them when off.
+        if ($name === self::NEWSLETTER_BLOCK_NAME) {
+            return $newsletter;
+        }
+
+        // Child blocks have already rendered: preserve an existing Sender control
+        // in its chosen position rather than inserting another one.
+        if ($newsletter === '' || strpos($content, 'id="' . self::NEWSLETTER_CHECKBOX_ID . '"') !== false) {
+            return $content;
+        }
+
+        // WooCommerce's Contact Information block has a div wrapper. Keep the
+        // control inside it so checkout hydration retains it in that section.
+        $end = strrpos($content, '</div>');
+        if ($end === false) {
+            return $content;
+        }
+        return substr($content, 0, $end) . $newsletter . substr($content, $end);
     }
 
     //Block checkout subscribe to newsletter
