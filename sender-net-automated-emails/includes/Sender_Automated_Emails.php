@@ -278,6 +278,8 @@ class Sender_Automated_Emails
             }
 
             new Sender_Carts($this);
+            require_once __DIR__ . '/Sender_Cart_Price_Sync.php';
+            new Sender_Cart_Price_Sync($this->senderApi);
         }
 
         if (!class_exists('Sender_WooCommerce')) {

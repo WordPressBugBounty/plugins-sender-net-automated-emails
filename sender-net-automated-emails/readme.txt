@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.11.1
+Stable tag: 2.11.2
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -466,3 +466,7 @@ purchased
 * Improved HPOS order exports, custom status support, and rate-limit retries.
 = 2.11.1 2026-10-04 =
 * Fixed newsletter checkbox visibility and settings in WooCommerce Blocks checkout.
+= 2.11.2 2026-10-27 =
+* Refresh product display prices in open Sender carts when WooCommerce product prices change.
+* Update simple product-only cart totals while preserving shipping and order values.
+* Improve product import compatibility with custom product-page templates.

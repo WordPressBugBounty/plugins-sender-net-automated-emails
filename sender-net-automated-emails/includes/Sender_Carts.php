@@ -420,6 +420,8 @@ class Sender_Carts
                 'ip_address' => Sender_Helper::normalizeIpToIpv4(WC_Geolocation::get_ip_address()),
         ];
 
+        $priceUpdatedAt = sprintf('%.6F', microtime(true));
+
         foreach ($items as $item => $values) {
 
             $_product = wc_get_product($values['data']->get_id());
@@ -458,6 +460,7 @@ class Sender_Carts
                     'qty' => $values['quantity'],
                     'image' => $image_url,
                     'product_id' => $_product->get_id(),
+                    'price_updated_at' => $priceUpdatedAt,
                     'description' => $description,
             ];
 
@@ -528,6 +531,10 @@ class Sender_Carts
             }
 
             $wc = $this->senderGetWoo();
+            // Checkout can fire this hook after the shopper session has been unloaded.
+            if (!$wc->session) {
+                return null;
+            }
 
             $items = $this->senderGetCart();
             $cartData = serialize($items);

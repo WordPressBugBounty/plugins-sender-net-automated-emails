@@ -12,6 +12,7 @@ class Sender_WooCommerce
     private $logFilePath;
     private $syncActive = false;
     private $syncState = [];
+    private $productImportScriptRendered = false;
 
     public function __construct($sender, $update = false)
     {
@@ -21,6 +22,7 @@ class Sender_WooCommerce
 
         $this->sender = $sender;
         add_action('woocommerce_single_product_summary', [$this, 'senderAddProductImportScript'], 10, 2);
+        add_action('wp_footer', [$this, 'senderAddProductImportScriptFallback']);
 
         //Declare action for cron job to sync data from interface
         add_action('sender_export_shop_data_cron', [$this, 'senderExportShopDataCronJob']);
@@ -534,9 +536,25 @@ class Sender_WooCommerce
         return [];
     }
 
-    public function senderAddProductImportScript()
+    public function senderAddProductImportScriptFallback()
     {
-        global $product;
+        // Custom product templates may not run WooCommerce's summary hook.
+        if (!is_product() || $this->productImportScriptRendered) {
+            return;
+        }
+
+        $product = wc_get_product(get_queried_object_id());
+        if ($product instanceof WC_Product) {
+            $this->senderAddProductImportScript($product);
+        }
+    }
+
+    public function senderAddProductImportScript($importProduct = null)
+    {
+        $product = $importProduct instanceof WC_Product ? $importProduct : ($GLOBALS['product'] ?? null);
+        if (!$product instanceof WC_Product || $this->productImportScriptRendered) {
+            return;
+        }
 
         $id = $product->get_id();
 
@@ -610,6 +628,7 @@ class Sender_WooCommerce
             $jsonData["discount"] = "-" . $pDiscount . "%";
         }
 
+        $this->productImportScriptRendered = true;
         ob_start();
         ?>
         <script type="application/sender+json"><?php echo json_encode($jsonData); ?></script>

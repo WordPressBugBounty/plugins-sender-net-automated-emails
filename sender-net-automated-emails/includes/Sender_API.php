@@ -351,6 +351,33 @@ class Sender_API
         return $this->senderBuildResponse($response);
     }
 
+    /** Send a small product-price event; the API updates matching carts in the background. */
+    public function senderSyncCartPrices(array $payload)
+    {
+        $body = wp_json_encode($payload);
+        if ($body === false || strlen($body) > 262144 || count($payload['products']) > 25) {
+            return false;
+        }
+
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/wordpress/cart-prices',
+            array_merge($this->senderBaseRequestArguments(), [
+                'body' => $body,
+                'timeout' => 15,
+                'redirection' => 0,
+            ])
+        );
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 202) {
+            return false;
+        }
+
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+
+        return is_array($data)
+            && ($data['success'] ?? false) === true
+            && ($data['accepted'] ?? null) === count($payload['products']);
+    }
+
     public function senderExportData($exportData)
     {
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($exportData), 'data_format' => 'body']);
