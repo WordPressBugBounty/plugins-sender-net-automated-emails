@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.11.3
+Stable tag: 2.11.4
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -472,3 +472,6 @@ purchased
 * Improve product import compatibility with custom product-page templates.
 = 2.11.3 2026-11-04 =
 * Improved access controls for debug file downloads.
+= 2.11.4 2026-11-04 =
+* Fixed syncs remaining blocked by an unfinished cancellation.
+* Improved connection and export timeouts, and clarified account connection errors.

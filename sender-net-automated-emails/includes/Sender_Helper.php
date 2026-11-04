@@ -64,6 +64,7 @@ class Sender_Helper
     const SYNC_STATE_OPTION = 'sender_sync_state';
     const SYNC_WORKER_DEBUG_OPTION = 'sender_sync_worker_debug';
     const SYNC_SCHEDULE_DEBUG_OPTION = 'sender_sync_schedule_debug';
+    const SYNC_CANCELLATION_TIMEOUT = 15 * MINUTE_IN_SECONDS;
 
     public static function getSyncState(): array
     {
@@ -84,10 +85,54 @@ class Sender_Helper
     {
         global $wpdb;
         // Read the worker's latest state, including on sites with persistent object caches.
-        return $wpdb->get_var($wpdb->prepare(
+        $query = $wpdb->prepare(
             "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
             self::SYNC_STATE_OPTION
-        ));
+        );
+        $previous = $wpdb->get_var($query);
+        $state = maybe_unserialize($previous);
+        if (!is_array($state) || ($state['status'] ?? '') !== 'cancelling'
+            || !self::hasExpiredCancellation($state)) {
+            return $previous;
+        }
+
+        // A terminated worker cannot acknowledge cancellation. Release that job
+        // after the grace period; every resumed worker still checks its ownership
+        // before sending another batch or saving progress/completion.
+        $state['status'] = 'cancelled';
+        $state['updated_at'] = current_time('mysql');
+        $state['recovered_at_utc'] = gmdate('Y-m-d H:i:s');
+        if (self::replaceSyncState($previous, $state)) {
+            return maybe_serialize($state);
+        }
+
+        // A concurrent request changed the job. Return its state, never our stale copy.
+        return $wpdb->get_var($query);
+    }
+
+    private static function hasExpiredCancellation(array $state): bool
+    {
+        if (isset($state['cancel_requested_at'])) {
+            $requestedAt = $state['cancel_requested_at'];
+            if (!is_int($requestedAt) && !(is_string($requestedAt) && ctype_digit($requestedAt))) {
+                return false;
+            }
+            $requestedAt = (int) $requestedAt;
+        } else {
+            // Existing installations only stored a WordPress-local date. Convert
+            // it using the site's timezone so those stuck jobs recover on update.
+            $updatedAt = $state['updated_at'] ?? null;
+            if (!is_string($updatedAt)) {
+                return false;
+            }
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $updatedAt, new DateTimeZone('UTC'));
+            if (!$date || $date->format('Y-m-d H:i:s') !== $updatedAt) {
+                return false;
+            }
+            $requestedAt = (int) get_gmt_from_date($updatedAt, 'U');
+        }
+
+        return $requestedAt > 0 && time() - $requestedAt >= self::SYNC_CANCELLATION_TIMEOUT;
     }
 
     public static function queueSyncJob($delay, $existingOnly = false)
@@ -174,6 +219,7 @@ class Sender_Helper
                 wp_clear_scheduled_hook('sender_export_shop_data_cron');
             }
             $state['status'] = $state['status'] === 'queued' ? 'cancelled' : 'cancelling';
+            $state['cancel_requested_at'] = time();
             $state['updated_at'] = current_time('mysql');
             if (self::replaceSyncState($previous, $state)) {
                 return true;

@@ -172,12 +172,17 @@ class Sender_Automated_Emails
                     update_option('sender_api_key', sanitize_text_field($updates[$name]));
                     $user = $this->senderApi->senderGetAccount();
                     if (!$user) {
+                        update_option('sender_account_disconnected', true);
+                        $error = $this->senderApi->getAccountRequestError();
+                        $message = is_wp_error($error) ? $error->get_error_message()
+                            : __('Could not verify your Sender account. Please try again.', 'sender-net-automated-emails');
                         add_action('admin_notices', [&$this, 'error_account_connected']);
-                        do_action('admin_notices', 'Incorrect API key.');
+                        do_action('admin_notices', $message);
                         return false;
                     }
 
                     if (isset($user->xRate)){
+                        update_option('sender_account_disconnected', true);
                         add_action('admin_notices', [&$this, 'error_account_connected']);
                         do_action('admin_notices', 'Too many requests. Try again after 1 minute.');
                         return false;

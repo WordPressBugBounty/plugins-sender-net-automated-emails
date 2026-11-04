@@ -8,8 +8,12 @@ require_once 'Sender_Helper.php';
 
 class Sender_API
 {
+    private const CONFIG_REQUEST_TIMEOUT = 20;
+    private const EXPORT_REQUEST_TIMEOUT = 30;
+
     private $senderBaseUrl = 'https://api.sender.net/v2/';
     private $senderStatsBaseUrl = 'https://stats.sender.net/commerce/';
+    private $accountRequestError = null;
 
     public function __construct()
     {
@@ -53,6 +57,13 @@ class Sender_API
         return $this->senderGetBaseArguments();
     }
 
+    private function senderConfigRequestArguments($delete = false)
+    {
+        return array_merge($this->senderBaseRequestArguments($delete), [
+            'timeout' => self::CONFIG_REQUEST_TIMEOUT,
+        ]);
+    }
+
     private function sender_remote_request($url, $args = []) {
         add_filter('http_headers_useragent', [$this, 'senderPluginVersionUserAgent']);
         try {
@@ -73,19 +84,46 @@ class Sender_API
 
     public function senderGetAccount()
     {
+        $this->accountRequestError = null;
         $data = $this->sender_remote_request(
             $this->senderBaseUrl . 'users',
-            $this->senderBaseRequestArguments()
+            $this->senderConfigRequestArguments()
         );
 
-        return $this->senderBuildResponse($data);
+        if (is_wp_error($data)) {
+            $this->accountRequestError = new WP_Error('sender_connection_failed',
+                __('Could not connect to Sender. Please try again.', 'sender-net-automated-emails'));
+            return false;
+        }
+
+        $response = $this->senderBuildResponse($data);
+        if (wp_remote_retrieve_response_code($data) === 401) {
+            $this->accountRequestError = new WP_Error('sender_invalid_api_key',
+                __('Incorrect API key.', 'sender-net-automated-emails'));
+            return false;
+        }
+        if (isset($response->xRate)) {
+            return $response;
+        }
+        if (!is_object($response) || !isset($response->account) || !is_object($response->account)) {
+            $this->accountRequestError = new WP_Error('sender_account_verification_failed',
+                __('Could not verify your Sender account. Please try again.', 'sender-net-automated-emails'));
+            return false;
+        }
+
+        return $response;
+    }
+
+    public function getAccountRequestError()
+    {
+        return $this->accountRequestError;
     }
 
     public function senderGetForms()
     {
         $data = $this->sender_remote_request(
             $this->senderBaseUrl . 'forms?type=embed&is_active=1&limit=100',
-            $this->senderBaseRequestArguments()
+            $this->senderConfigRequestArguments()
         );
 
         return $this->senderBuildResponse($data);
@@ -99,7 +137,7 @@ class Sender_API
         do {
             $data = $this->sender_remote_request(
                 $this->senderBaseUrl . 'tags?limit=1000&page=' . $page,
-                $this->senderBaseRequestArguments()
+                $this->senderConfigRequestArguments()
             );
 
             $response = $this->senderBuildResponse($data);
@@ -307,7 +345,7 @@ class Sender_API
     {
         $response = $this->sender_remote_request(
             $this->senderBaseUrl . 'stores/' . get_option('sender_store_register'),
-            $this->senderBaseRequestArguments()
+            $this->senderConfigRequestArguments()
         );
 
         return $this->senderBuildResponse($response);
@@ -326,7 +364,7 @@ class Sender_API
             'type' => 'wordpress'
         ];
 
-        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($storeParams)]);
+        $params = array_merge($this->senderConfigRequestArguments(), ['body' => json_encode($storeParams)]);
 
         $response = $this->sender_remote_post(
             $this->senderBaseUrl . 'stores',
@@ -342,7 +380,7 @@ class Sender_API
             'delete_subscribers' => $deleteSubscribers
         ];
 
-        $removingStoreParams = array_merge($this->senderBaseRequestArguments(true), ['body' => json_encode($bodyParams)]);
+        $removingStoreParams = array_merge($this->senderConfigRequestArguments(true), ['body' => json_encode($bodyParams)]);
         $response = $this->sender_remote_request(
             $this->senderBaseUrl . 'stores/' . get_option('sender_store_register'),
             $removingStoreParams
@@ -380,7 +418,11 @@ class Sender_API
 
     public function senderExportData($exportData)
     {
-        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($exportData), 'data_format' => 'body']);
+        $params = array_merge($this->senderBaseRequestArguments(), [
+            'body' => json_encode($exportData),
+            'data_format' => 'body',
+            'timeout' => self::EXPORT_REQUEST_TIMEOUT,
+        ]);
 
         $response = $this->sender_remote_post(
             $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/import_shop_data',
@@ -425,7 +467,7 @@ class Sender_API
 
     public function deleteSubscribers(array $data)
     {
-        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data), 'method' => 'DELETE']);
+        $params = array_merge($this->senderConfigRequestArguments(), ['body' => json_encode($data), 'method' => 'DELETE']);
         $response = $this->sender_remote_request(
             $this->senderBaseUrl . 'subscribers/',
             $params
