@@ -192,6 +192,11 @@ class Sender_Templates_Loader
 
     public function downloadDebugFile()
     {
+        if (!current_user_can('manage_options')) {
+            wp_die('Access denied.', '', ['response' => 403]);
+        }
+        check_admin_referer('sender_debug_download');
+        nocache_headers();
         header("Content-Type: text/plain");
         header("Content-Disposition: attachment; filename=sender-debug-info.txt");
 

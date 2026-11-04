@@ -4,6 +4,7 @@
     $mappingOn = (bool)get_option('sender_enable_role_group_mapping');
     $roles = get_editable_roles();
     $logDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_sync_log'), 'sender_sync_log');
+    $debugDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_debug_download'), 'sender_debug_download');
     $syncState = Sender_Helper::getSyncState();
     $syncFailed = $syncState['status'] === 'failed';
     $syncCancelMessage = $syncState['status'] === 'cancelling'
@@ -479,7 +480,7 @@
                         <?php esc_html_e('If you contact Sender support, please download and attach the debug file below. It contains configuration details that help us diagnose issues quickly.', 'sender-net-automated-emails'); ?>
                     </p>
 
-                    <a href="<?php echo admin_url('admin-post.php?action=sender_debug_download'); ?>"
+                    <a href="<?php echo esc_url($debugDownloadUrl); ?>"
                        class="sender-secondary-button sender-medium sender-br-5">
                         <?php esc_html_e('Download Debug File', 'sender-net-automated-emails'); ?>
                     </a>

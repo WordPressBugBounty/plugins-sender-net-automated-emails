@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.11.2
+Stable tag: 2.11.3
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -470,3 +470,5 @@ purchased
 * Refresh product display prices in open Sender carts when WooCommerce product prices change.
 * Update simple product-only cart totals while preserving shipping and order values.
 * Improve product import compatibility with custom product-page templates.
+= 2.11.3 2026-11-04 =
+* Improved access controls for debug file downloads.
