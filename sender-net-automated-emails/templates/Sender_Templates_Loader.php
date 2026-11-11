@@ -14,9 +14,11 @@ class Sender_Templates_Loader
 
         add_action('wp_ajax_checkSyncStatus', [$this, 'checkSyncStatus']);
         add_action('wp_ajax_sender_cancel_shop_sync', [$this, 'cancelShopSync']);
+        add_action('wp_ajax_sender_resume_cart_update', [$this, 'resumeCartUpdate']);
         add_action('admin_post_sender_sync_log', [$this, 'downloadSyncLog']);
         add_action('admin_menu', [&$this, 'senderInitSidebar'], 2, 2);
         add_action('admin_post_sender_debug_download', [$this, 'downloadDebugFile']);
+        add_action('admin_post_sender_support_download', [$this, 'downloadSupportBundle']);
     }
 
     function senderInitSidebar()
@@ -137,6 +139,7 @@ class Sender_Templates_Loader
             'job_id' => $state['job_id'] ?? '',
             'is_finished' => $state['status'] === 'completed',
             'status' => $state['status'],
+            'cart_update' => class_exists('Sender_Cart_Recovery_Sync') ? Sender_Cart_Recovery_Sync::getStatus() : null,
             'stage' => $state['stage'] ?? '',
             'updated_at' => $state['updated_at'] ?? null,
             'synced_at' => $state['status'] === 'completed'
@@ -164,6 +167,21 @@ class Sender_Templates_Loader
         $this->checkSyncStatus();
     }
 
+    public function resumeCartUpdate()
+    {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(null, 403);
+            return;
+        }
+        check_ajax_referer('sender_resume_cart_update', 'nonce');
+        if (!class_exists('Sender_Cart_Recovery_Sync')
+            || !(new Sender_Cart_Recovery_Sync($this->sender->senderApi))->resume()) {
+            wp_send_json_error(null, 409);
+            return;
+        }
+        wp_send_json_success(Sender_Cart_Recovery_Sync::getStatus());
+    }
+
     public function downloadSyncLog()
     {
         if (!current_user_can('manage_options')) {
@@ -173,20 +191,62 @@ class Sender_Templates_Loader
         nocache_headers();
         header('Content-Type: text/plain; charset=utf-8');
         header('Content-Disposition: attachment; filename="export-log.txt"');
+        echo $this->getSyncLog();
+        exit;
+    }
+
+    private function getSyncLog()
+    {
         $state = Sender_Helper::getSyncState();
-        echo 'Sync status: ' . $state['status'] . "\n";
-        echo 'Downloaded at (UTC): ' . gmdate('Y-m-d H:i:s') . "\n";
+        $log = 'Sync status: ' . $state['status'] . "\n";
+        $log .= 'Downloaded at (UTC): ' . gmdate('Y-m-d H:i:s') . "\n";
         if ($state['status'] === 'queued' || ($state['status'] === 'cancelled' && empty($state['stage']))) {
-            echo wp_json_encode(Sender_Helper::getSyncDiagnostics($state), JSON_PRETTY_PRINT) . "\n";
-            echo "This job has not started. Any log below is from the previous export.\n";
+            $log .= wp_json_encode(Sender_Helper::getSyncDiagnostics($state), JSON_PRETTY_PRINT) . "\n";
+            $log .= "This job has not started. Any log below is from the previous export.\n";
         }
         $path = plugin_dir_path(__FILE__) . '../export-log.txt';
-        if (is_readable($path)) {
-            echo "\nLatest export log:\n";
-            readfile($path);
-        } else {
-            echo "No export log is available yet.\n";
+        return $log . (is_readable($path)
+            ? "\nLatest export log:\n" . file_get_contents($path)
+            : "No export log is available yet.\n");
+    }
+
+    public function downloadSupportBundle()
+    {
+        if (!current_user_can('manage_options')) {
+            wp_die('Access denied.', '', ['response' => 403]);
         }
+        check_admin_referer('sender_support_download');
+        require_once ABSPATH . 'wp-admin/includes/class-pclzip.php';
+        $path = wp_tempnam('sender-support.zip');
+        $contents = false;
+        if ($path) {
+            try {
+                $archive = new PclZip($path);
+                $files = [
+                    [PCLZIP_ATT_FILE_NAME => 'sender-debug-info.txt', PCLZIP_ATT_FILE_CONTENT => $this->getDebugInfo()],
+                    [PCLZIP_ATT_FILE_NAME => 'export-log.txt', PCLZIP_ATT_FILE_CONTENT => $this->getSyncLog()],
+                ];
+                $created = $archive->create($files, PCLZIP_OPT_NO_COMPRESSION);
+                unset($archive, $files);
+                if ($created) {
+                    $contents = @file_get_contents($path);
+                }
+            } catch (\Throwable $error) {
+                $contents = false;
+            } finally {
+                wp_delete_file($path);
+            }
+        }
+        if (!is_string($contents) || $contents === '') {
+            wp_die(esc_html__('Unable to create the support file. Please try again.', 'sender-net-automated-emails'), '', ['response' => 500]);
+        }
+        // Buffered notices must not be prepended to an otherwise valid ZIP.
+        while (ob_get_level() > 0 && @ob_end_clean()) {
+        }
+        nocache_headers();
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="sender-support.zip"');
+        echo $contents;
         exit;
     }
 
@@ -200,6 +260,12 @@ class Sender_Templates_Loader
         header("Content-Type: text/plain");
         header("Content-Disposition: attachment; filename=sender-debug-info.txt");
 
+        echo $this->getDebugInfo();
+        exit;
+    }
+
+    private function getDebugInfo()
+    {
         $info = [];
 
         $info['timestamp']          = current_time('mysql');
@@ -231,8 +297,23 @@ class Sender_Templates_Loader
             $info['settings'][$key] = maybe_unserialize($val);
         }
 
-        echo print_r($info, true);
-        exit;
+        if (class_exists('Sender_Cart_Recovery_Sync')) {
+            $state = get_option(Sender_Cart_Recovery_Sync::STATE);
+            $info['cart_recovery_update'] = Sender_Cart_Recovery_Sync::getStatus();
+            $info['cart_recovery_update']['progress'] = is_array($state)
+                ? array_intersect_key($state, array_flip(['store', 'source', 'after', 'last', 'done', 'sent', 'failed', 'last_error'])) : [];
+            foreach (['created_at', 'last_attempt_at', 'completed_at'] as $key) {
+                $info['cart_recovery_update'][$key . '_utc'] = !empty($state[$key])
+                    ? gmdate('Y-m-d H:i:s', $state[$key]) : 'Not recorded';
+            }
+            $next = wp_next_scheduled(Sender_Cart_Recovery_Sync::ACTION);
+            $info['cart_recovery_update']['next_run_utc'] = $next ? gmdate('Y-m-d H:i:s', $next) : 'Not scheduled';
+            $info['cart_recovery_update']['completion_meaning'] = 'All eligible batches accepted by Sender; backend updates run asynchronously.';
+        } else {
+            $info['cart_recovery_update'] = ['status' => 'unavailable'];
+        }
+
+        return print_r($info, true);
     }
 
 }

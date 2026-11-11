@@ -1347,9 +1347,7 @@ class Sender_WooCommerce
         $cart->cart_status = Sender_Helper::UNPAID_CART;
         $cart->save();
 
-        $baseUrl = wc_get_cart_url();
-        $separator = empty(parse_url($baseUrl, PHP_URL_QUERY)) ? '?' : '&';
-        $cartUrl = $baseUrl . $separator . 'hash=' . $cart->id;
+        $cartUrl = $cart->getRecoveryUrl();
 
         $data = [
             "external_id" => $cart->id,

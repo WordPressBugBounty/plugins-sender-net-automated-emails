@@ -309,6 +309,9 @@ class Sender_Webhooks
 
     public function get_plugin_version()
     {
+        if (!function_exists('get_plugin_data')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
         $plugin_version = '';
         $plugin_file_path = plugin_dir_path(__FILE__) . '../sender.php';
         if (file_exists($plugin_file_path)) {

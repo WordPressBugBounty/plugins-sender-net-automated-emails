@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.11.4
+Stable tag: 2.12.0
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -475,3 +475,8 @@ purchased
 = 2.11.4 2026-11-04 =
 * Fixed syncs remaining blocked by an unfinished cancellation.
 * Improved connection and export timeouts, and clarified account connection errors.
+= 2.12.0 2026-11-09 =
+* Improved cart recovery safety when reinstalling the plugin.
+* Secured abandoned cart recovery with signed links and customer ownership checks.
+* Added authenticated synchronization of signed recovery links for existing carts, selected by Sender.
+* Improved the settings layout and added a support ZIP with debug information, sync logs, and store update status.

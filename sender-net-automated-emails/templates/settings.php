@@ -4,8 +4,19 @@
     $mappingOn = (bool)get_option('sender_enable_role_group_mapping');
     $roles = get_editable_roles();
     $logDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_sync_log'), 'sender_sync_log');
-    $debugDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_debug_download'), 'sender_debug_download');
+    $debugDownloadUrl = wp_nonce_url(admin_url('admin-post.php?action=sender_support_download'), 'sender_support_download');
     $syncState = Sender_Helper::getSyncState();
+    $cartUpdate = class_exists('Sender_Cart_Recovery_Sync') ? Sender_Cart_Recovery_Sync::getStatus()
+        : ['status' => 'paused', 'done' => false, 'can_resume' => false, 'sent' => 0];
+    $cartUpdateMessages = [
+        'running' => __('A one-time store update is running in the background.', 'sender-net-automated-emails'),
+        'attention' => __('The store update has not finished. You can resume it below.', 'sender-net-automated-emails'),
+        'completed' => __('Cart link check completed.', 'sender-net-automated-emails'),
+        'empty' => __('No saved cart updates needed.', 'sender-net-automated-emails'),
+        'paused' => __('Connect your store to continue this update.', 'sender-net-automated-emails'),
+        'failed' => __('Could not resume the update. Please try again.', 'sender-net-automated-emails'),
+        'sent' => __('Cart updates sent: %s', 'sender-net-automated-emails'),
+    ];
     $syncFailed = $syncState['status'] === 'failed';
     $syncCancelMessage = $syncState['status'] === 'cancelling'
         ? __('Cancelling sync. Waiting for the worker to stop before another sync can start.', 'sender-net-automated-emails')
@@ -85,9 +96,9 @@
 
         <?php } else { ?>
         <div class="sender-settings-layout sender-d-flex sender-flex-dir-column">
-            <div class="sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between">
+            <div class="sender-account-card sender-box sender-br-5">
                 <div>
-                    <div class="sender-mb-20">
+                    <div>
                         <img src="<?php echo plugin_dir_url(dirname(__FILE__)) . 'assets/images/logo.svg'; ?>"
                              class="sender-logo sender-small" alt="<?php esc_attr_e('Sender logo', 'sender-net-automated-emails'); ?>">
                     </div>
@@ -101,14 +112,14 @@
                         </div>
                         <div class="sender-status-text sender-p-relative sender-default-text">
                             <?php
-                            _e('Connected to Sender account', 'sender-net-automated-emails');
+                            esc_html_e('Connected account', 'sender-net-automated-emails');
                             echo '<br><strong>' . esc_html(get_option('sender_account_title')) . '</strong>';
                             ?>
                         </div>
                     </div>
 
                     <div id="foobar" class="sender-btn-wrap sender-d-flex">
-                        <div class="sender-mb-20">
+                        <div>
                             <input type="button" name="submit" id="sender-confirmation"
                                    class="sender-cta-button sender-medium sender-br-5"
                                    value="<?php esc_attr_e('Change user', 'sender-net-automated-emails'); ?>">
@@ -151,11 +162,18 @@
                 </div>
             </div>
             <?php if ($wooEnabled) { ?>
-                <form method="post" class="sender-flex-dir-column sender-d-flex sender-h-100" action=''
-                      id="sender-form-settings">
-                    <div class="sender-dual-box-wrapper sender-box">
-                        <div class="sender-plugin-settings sender-br-5 sender-p-relative">
-                            <div class="sender-header sender-mb-20"><?php _e('WooCommerce settings', 'sender-net-automated-emails'); ?></div>
+                <div id="sender-store-tools" class="sender-store-tools sender-box sender-br-5">
+                    <div class="sender-tools-tabs" role="tablist" aria-label="<?php esc_attr_e('Sender settings', 'sender-net-automated-emails'); ?>">
+                        <button type="button" id="sender-tab-settings" class="sender-tools-tab" role="tab" aria-selected="true" aria-controls="sender-settings-panel" tabindex="0"><?php esc_html_e('Settings', 'sender-net-automated-emails'); ?></button>
+                        <button type="button" id="sender-tab-sync" class="sender-tools-tab" role="tab" aria-selected="false" aria-controls="sender-sync-panel" tabindex="-1"><?php esc_html_e('Sync', 'sender-net-automated-emails'); ?></button>
+                        <button type="button" id="sender-tab-debug" class="sender-tools-tab" role="tab" aria-selected="false" aria-controls="sender-debug-panel" tabindex="-1"><?php esc_html_e('Support', 'sender-net-automated-emails'); ?></button>
+                    </div>
+                    <form method="post" action="" id="sender-form-settings">
+                        <div id="sender-settings-panel" class="sender-tools-panel" role="tabpanel" aria-labelledby="sender-tab-settings">
+                            <h2 class="sender-panel-title"><?php esc_html_e('Store settings', 'sender-net-automated-emails'); ?></h2>
+                            <div class="sender-preferences-grid">
+                            <section id="sender-tracking-settings" class="sender-preferences-section" aria-labelledby="sender-tracking-title">
+                            <h3 id="sender-tracking-title"><?php esc_html_e('Tracking and groups', 'sender-net-automated-emails'); ?></h3>
                             <!-- Enable tracking -->
                             <div class="sender-options sender-d-flex sender-flex-dir-column">
                                 <div class="sender-option sender-d-flex sender-p-relative sender-mb-20">
@@ -229,7 +247,7 @@
                                 <!-- Registration role => group -->
                                 <div class="sender-option sender-d-flex sender-p-relative sender-mb-20 sender-mt-20">
                                     <input type="hidden" value="0" name="sender_enable_role_group_mapping">
-                                    <label for="sender_enable_role_group_mapping"
+                                    <label id="sender-role-group-toggle-label" for="sender_enable_role_group_mapping"
                                            class="sender-label sender-checkbox-label sender-p-relative">
                                         <input class="sender-checkbox" type="checkbox" id="sender_enable_role_group_mapping"
                                                name="sender_enable_role_group_mapping"
@@ -299,26 +317,25 @@
                                                 </div>
                                             <?php
                                             endforeach;
-                                        else:
-                                            ?>
-                                            <div class="sender-empty-state sender-note sender-mt-10 sender-ml-10" style="font-size:13px; line-height:1.7; color:#777; text-align:center; padding:12px; border:1px dashed #ddd; border-radius:5px;">
-                                                <?php _e('No role mappings added yet. Click “Add Role Mapping” to create your first one.', 'sender-net-automated-emails'); ?>
-                                            </div>
-                                        <?php
                                         endif;
                                         ?>
+                                        <p id="sender-role-group-empty" class="sender-note" <?php echo !empty($mapping) ? 'hidden' : ''; ?>>
+                                            <?php esc_html_e('No role mappings.', 'sender-net-automated-emails'); ?>
+                                        </p>
                                     </div>
 
-                                    <button type="button" id="sender-add-role-group" class="sender-secondary-button sender-medium sender-br-5 sender-mt-20">
+                                    <button type="button" id="sender-add-role-group" aria-describedby="sender-role-group-help" class="sender-secondary-button sender-medium sender-br-5 sender-mt-20">
                                         <?php _e('Add Role Mapping', 'sender-net-automated-emails'); ?>
                                     </button>
+                                    <p id="sender-role-group-help" class="sender-role-group-help" role="status" hidden>
+                                        <?php esc_html_e('To add role mappings, enable “Assign registration group by user role” above.', 'sender-net-automated-emails'); ?>
+                                    </p>
                                 </div>
                             </div>
 
-                        </div>
-
-                        <div class="sender-plugin-settings sender-br-5 sender-p-relative">
-                            <div class="sender-header sender-mb-20"><?php _e('Register to our newsletter', 'sender-net-automated-emails') ?></div>
+                            </section>
+                            <section id="sender-newsletter-settings" class="sender-preferences-section" aria-labelledby="sender-newsletter-title">
+                            <h3 id="sender-newsletter-title"><?php esc_html_e('Newsletter preferences', 'sender-net-automated-emails'); ?></h3>
                             <p><strong><?php _e('Enable tracking must be active', 'sender-net-automated-emails') ?></strong></p>
                             <div class="sender-options sender-d-flex sender-flex-dir-column">
 
@@ -390,22 +407,17 @@
                                     </div>
                                 </div>
 
-                                <!--Save-->
-                                <div class="sender-btn-wrap sender-d-flex sender-mt-20 sender-pt-20">
-                                    <input type="submit" name="submit" id="submit"
-                                           class="sender-cta-button sender-medium sender-mb-20 sender-br-5"
-                                           value="<?php _e('Save Woocommerce settings', 'sender-net-automated-emails'); ?>">
-                                </div>
-
                             </div>
+                            </section>
+                            </div>
+                        </div>
+                        <div class="sender-settings-save">
+                            <input type="submit" name="submit" id="sender-save-settings" class="sender-cta-button sender-medium sender-br-5" value="<?php esc_attr_e('Save settings', 'sender-net-automated-emails'); ?>">
                             <?php wp_nonce_field('sender_admin_referer'); ?>
-
-                    </div>
-
-                </div>
-            </form>
-                <div id="sender-sync-panel" tabindex="-1" aria-labelledby="sender-sync-title" class="sender-sync-panel sender-flex-dir-column sender-box sender-br-5 sender-d-flex sender-justified-between sender-mt-20">
-                    <h3 id="sender-sync-title" class="sender-header"><?php esc_html_e('Sync with Sender', 'sender-net-automated-emails'); ?></h3>
+                        </div>
+                    </form>
+                <div id="sender-sync-panel" role="tabpanel" hidden aria-labelledby="sender-tab-sync" class="sender-tools-panel sender-sync-panel sender-flex-dir-column sender-d-flex">
+                    <h2 id="sender-sync-title" class="sender-panel-title"><?php esc_html_e('Sync with Sender', 'sender-net-automated-emails'); ?></h2>
                     <form method="post" class="sender-flex-dir-column sender-d-flex sender-h-100" action=''
                           id="sender-export-data">
                         <div class="sender-mb-20">
@@ -457,12 +469,30 @@
                                 </a>
                             </div>
                             <?php if ($isSyncRunning) : ?>
-                                <p class="sender-note"><?php esc_html_e('Cancellation stops remaining work. Data already sent to Sender is kept.', 'sender-net-automated-emails'); ?></p>
+                                <p id="sender-cancel-sync-help" class="sender-note"><?php esc_html_e('Cancellation stops remaining work. Data already sent to Sender is kept.', 'sender-net-automated-emails'); ?></p>
                             <?php endif; ?>
 
                         </div>
                         <?php wp_nonce_field('sender_admin_referer'); ?>
                     </form>
+
+                <div id="sender-cart-update-panel" class="sender-cart-update-panel sender-store-update" <?php echo $cartUpdate['done'] ? 'hidden' : ''; ?>
+                       aria-labelledby="sender-cart-update-title" data-status="<?php echo esc_attr($cartUpdate['status']); ?>">
+                    <h3 id="sender-cart-update-title" class="sender-header"><?php esc_html_e('Store update', 'sender-net-automated-emails'); ?></h3>
+                    <p class="sender-cart-update-description" <?php echo $cartUpdate['done'] ? 'hidden' : ''; ?>>
+                        <?php esc_html_e('Keeps existing store data compatible with this plugin version.', 'sender-net-automated-emails'); ?>
+                    </p>
+                    <p id="sender-cart-update-message" role="status" aria-live="polite"><?php echo esc_html($cartUpdateMessages[
+                        $cartUpdate['done'] && !empty($cartUpdate['sent_known']) && !$cartUpdate['sent'] ? 'empty' : $cartUpdate['status']
+                    ]); ?></p>
+                    <p id="sender-cart-update-progress" class="sender-note" <?php echo !$cartUpdate['sent'] || $cartUpdate['done'] ? 'hidden' : ''; ?>>
+                        <?php echo esc_html(sprintf($cartUpdateMessages['sent'], number_format_i18n($cartUpdate['sent']))); ?>
+                    </p>
+                    <button type="button" id="sender-resume-cart-update" class="sender-secondary-button sender-medium sender-br-5"
+                            <?php echo $cartUpdate['can_resume'] ? '' : 'hidden'; ?>>
+                        <?php esc_html_e('Resume update', 'sender-net-automated-emails'); ?>
+                    </button>
+                </div>
 
                     <div class="sender-default-text sender-mb-20">
                         <a href="https://help.sender.net/knowledgebase/the-documentation-for-woocommerce-plugin/"
@@ -472,18 +502,18 @@
                         <?php _e('for documentation of WooCommerce plugin', 'sender-net-automated-emails'); ?>
                     </div>
                 </div>
-
-                <div class="sender-debug-panel sender-box sender-br-5 sender-mt-20 sender-p-20">
-                    <h3 class="sender-header"><?php esc_html_e('Debug Information', 'sender-net-automated-emails'); ?></h3>
+                <div id="sender-debug-panel" class="sender-tools-panel sender-debug-panel" role="tabpanel" aria-labelledby="sender-tab-debug" hidden>
+                    <h2 class="sender-panel-title"><?php esc_html_e('Support', 'sender-net-automated-emails'); ?></h2>
 
                     <p class="sender-note" style="margin-bottom:12px;">
-                        <?php esc_html_e('If you contact Sender support, please download and attach the debug file below. It contains configuration details that help us diagnose issues quickly.', 'sender-net-automated-emails'); ?>
+                        <?php esc_html_e('Contacting Sender support? Download and attach this ZIP with your configuration details, latest sync log, and store update status.', 'sender-net-automated-emails'); ?>
                     </p>
 
                     <a href="<?php echo esc_url($debugDownloadUrl); ?>"
                        class="sender-secondary-button sender-medium sender-br-5">
-                        <?php esc_html_e('Download Debug File', 'sender-net-automated-emails'); ?>
+                        <?php esc_html_e('Download support file', 'sender-net-automated-emails'); ?>
                     </a>
+                </div>
                 </div>
             <?php } else { ?>
             <div class="sender-box sender-br-5 sender-p-relative" style="padding-top:0px!important">
@@ -580,6 +610,45 @@
     ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     var checkboxEl = jQuery('#sender_allow_tracking');
     var checkboxLabel = jQuery('#sender_subscribe_label');
+
+    (function senderStoreToolsTabs() {
+        const tabs = Array.from(document.querySelectorAll('#sender-store-tools [role="tab"]'));
+        if (!tabs.length) return;
+        function activate(tab, focus) {
+            tabs.forEach(function (item) {
+                const selected = item === tab;
+                item.setAttribute('aria-selected', String(selected));
+                item.tabIndex = selected ? 0 : -1;
+                document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+            });
+            document.getElementById('sender-form-settings').hidden = tab.getAttribute('aria-controls') !== 'sender-settings-panel';
+            if (focus) tab.focus();
+        }
+        tabs.forEach(function (tab, index) {
+            tab.addEventListener('click', function () {
+                activate(tab, false);
+                window.history.replaceState(null, '', '#' + tab.getAttribute('aria-controls'));
+            });
+            tab.addEventListener('keydown', function (event) {
+                let target;
+                if (event.key === 'ArrowRight') target = tabs[(index + 1) % tabs.length];
+                if (event.key === 'ArrowLeft') target = tabs[(index + tabs.length - 1) % tabs.length];
+                if (event.key === 'Home') target = tabs[0];
+                if (event.key === 'End') target = tabs[tabs.length - 1];
+                if (target) { event.preventDefault(); activate(target, true); }
+            });
+        });
+        function showLinkedPanel() {
+            const target = window.location.hash === '#sender-cart-update-panel' ? '#sender-sync-panel' : window.location.hash;
+            const tab = tabs.find(function (item) { return '#' + item.getAttribute('aria-controls') === target; });
+            if (tab) activate(tab, false);
+        }
+        showLinkedPanel();
+        window.addEventListener('hashchange', showLinkedPanel);
+        document.querySelectorAll('a[href="#sender-sync-panel"]').forEach(function (link) {
+            link.addEventListener('click', function () { activate(document.getElementById('sender-tab-sync'), false); });
+        });
+    })();
 
 
     jQuery(document).ready(function () {
@@ -701,10 +770,12 @@
 
         function updateRoleGroupState() {
             const on = $roleGroupToggle.is(':checked');
+            $('#sender-role-group-help').prop('hidden', on);
+            $('#sender-role-group-toggle-label').removeClass('sender-role-group-highlight');
 
             if (on) {
                 // Enable repeater + disable "Save New registrations to"
-                $repeaterWrap.removeClass('sender-disabled')
+                $repeaterWrap.find('#sender-role-group-repeater').removeClass('sender-disabled')
                     .find('input, select, button')
                     .prop('disabled', false);
                 $saveNewReg.prop('disabled', true)
@@ -713,7 +784,7 @@
                 initSelect2ForRepeater();
             } else {
                 // Disable repeater + enable "Save New registrations to"
-                $repeaterWrap.addClass('sender-disabled')
+                $repeaterWrap.find('#sender-role-group-repeater').addClass('sender-disabled')
                     .find('input, select, button')
                     .prop('disabled', true);
                 $saveNewReg.prop('disabled', false)
@@ -728,12 +799,22 @@
 
     jQuery(function ($) {
         const $repeater = $('#sender-role-group-repeater');
+        let roleHighlightTimeout;
         const $roles = <?php echo json_encode(array_map(function ($role) {
             return translate_user_role($role['name']);
         }, get_editable_roles())); ?>;
         const $groups = <?php echo json_encode($groups); ?>;
 
         $('#sender-add-role-group').on('click', function () {
+            if (!$('#sender_enable_role_group_mapping').is(':checked')) {
+                $('#sender-role-group-help').prop('hidden', false);
+                $('#sender-role-group-toggle-label').addClass('sender-role-group-highlight');
+                clearTimeout(roleHighlightTimeout);
+                roleHighlightTimeout = setTimeout(function () {
+                    $('#sender-role-group-toggle-label').removeClass('sender-role-group-highlight');
+                }, 3000);
+                return;
+            }
             const newRow = $('<div class="sender-role-group-row sender-d-flex sender-mb-10 sender-align-center">');
 
             const roleSelect = $('<select name="sender_role_group_map_roles[]" class="sender-br-5 select2-custom sender-role-select" style="width:45%">')
@@ -748,10 +829,11 @@
                 groupSelect.append(`<option value="${gid}">${gname}</option>`);
             });
 
-            const removeBtn = $('<button type="button" class="sender-remove-role-group sender-cta-button sender-small sender-br-5" style="margin-left:8px;">').text(senderSettingsMessages.remove);
+            const removeBtn = $('<button type="button" class="sender-remove-role-group sender-cta-button sender-small sender-br-5">').text(senderSettingsMessages.remove);
 
             newRow.append(roleSelect, groupSelect, removeBtn);
             $repeater.append(newRow);
+            $('#sender-role-group-empty').prop('hidden', true);
 
             if ($.fn.select2) {
                 newRow.find('select.select2-custom').select2({ width: '100%', allowClear: true });
@@ -760,6 +842,7 @@
 
         $(document).on('click', '.sender-remove-role-group', function () {
             $(this).closest('.sender-role-group-row').remove();
+            $('#sender-role-group-empty').prop('hidden', $repeater.find('.sender-role-group-row').length > 0);
         });
     });
 
@@ -812,6 +895,7 @@
                 updateSyncNotice(response.data.status);
                 currentJobId = response.data.job_id || '';
                 jQuery('#sender-cancel-sync').prop('disabled', response.data.status === 'cancelling');
+                jQuery('#sender-cancel-sync-help').toggle(response.data.is_running);
                 if (response.data.is_running) {
                     const message = response.data.status === 'queued'
                         ? syncMessages.queued
@@ -866,6 +950,45 @@
         const intervalId = setInterval(function () {
             jQuery.ajax({url: ajaxurl, method: 'POST', data: {action: 'checkSyncStatus'}, success: renderSyncStatus});
         }, 10000);
+    })();
+    <?php endif; ?>
+
+    <?php if (!$cartUpdate['done'] && $cartUpdate['status'] !== 'paused' && $apiKey && get_option('sender_store_register') && !get_option('sender_account_disconnected') && $wooEnabled) : ?>
+    (function pollCartUpdate() {
+        const messages = <?php echo wp_json_encode($cartUpdateMessages, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const endpoint = <?php echo wp_json_encode(admin_url('admin-ajax.php')); ?>;
+        const nonce = <?php echo wp_json_encode(wp_create_nonce('sender_resume_cart_update')); ?>;
+        const button = jQuery('#sender-resume-cart-update');
+        function render(state) {
+            if (!state) return;
+            jQuery('#sender-cart-update-panel').attr('data-status', state.status).prop('hidden', state.done);
+            jQuery('#sender-cart-update-message').text(messages[
+                state.done && state.sent_known && !state.sent ? 'empty' : state.status
+            ]);
+            jQuery('.sender-cart-update-description').prop('hidden', state.done);
+            jQuery('#sender-cart-update-progress')
+                .text(messages.sent.replace('%s', Number(state.sent).toLocaleString()))
+                .prop('hidden', !state.sent || state.done);
+            button.prop('hidden', !state.can_resume).prop('disabled', false);
+            if (state.done || state.status === 'paused') clearInterval(timer);
+        }
+        const timer = setInterval(function () {
+            jQuery.ajax({url: endpoint, method: 'POST', data: {action: 'checkSyncStatus'}, success: function (response) {
+                if (response.success) render(response.data.cart_update);
+            }});
+        }, 10000);
+        button.on('click', function () {
+            button.prop('disabled', true);
+            jQuery.ajax({url: endpoint, method: 'POST', data: {action: 'sender_resume_cart_update', nonce: nonce},
+                success: function (response) {
+                    if (response.success) render(response.data);
+                    else failed();
+                }, error: failed});
+        });
+        function failed() {
+            button.prop('disabled', false);
+            jQuery('#sender-cart-update-message').text(messages.failed);
+        }
     })();
     <?php endif; ?>
 </script>

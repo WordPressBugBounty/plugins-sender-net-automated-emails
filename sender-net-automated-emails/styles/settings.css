@@ -183,6 +183,46 @@
     margin-bottom: 30px;
 }
 
+.sender-settings-layout {
+    gap: 20px;
+}
+
+.sender-settings-layout > div.sender-account-card {
+    display: flex;
+    align-self: flex-start;
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 28px;
+    padding: 24px 48px 24px 32px;
+    margin-bottom: 0;
+}
+
+.sender-account-card .sender-logout {
+    min-width: 0;
+    justify-content: flex-start;
+    gap: 16px;
+}
+
+.sender-account-card .sender-status-text {
+    overflow-wrap: anywhere;
+}
+
+.sender-account-card .sender-logout > .sender-status-display {
+    margin: 0;
+}
+
+.sender-account-card .sender-logout .sender-btn-wrap {
+    flex: 0 0 auto;
+    justify-content: flex-start;
+}
+
+.sender-account-card #sender-confirmation {
+    margin: 0;
+}
+
 .sender-cta-button {
     background-color: #ff8d00;
     cursor: pointer;
@@ -212,6 +252,36 @@
     gap:15px;
 }
 
+
+#sender-role-group-empty {
+    display: block;
+    margin: 0;
+    font-size: 13px;
+    color: #777;
+}
+
+.sender-role-group-help {
+    margin: 12px 0 0;
+    padding: 12px 14px;
+    border-left: 3px solid #ff8d00;
+    border-radius: 3px;
+    background: #fff4e5;
+    color: #633b00;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.sender-role-group-highlight {
+    background: #fff4e5;
+    outline: 2px solid #ff8d00;
+    outline-offset: 6px;
+    border-radius: 3px;
+}
+
+.sender-remove-role-group {
+    padding: 10px 16px;
+    flex-shrink: 0;
+}
 
 .sender-cta-button.sender-medium {
     padding: 12px 20px;
@@ -839,7 +909,8 @@ label.sender-checkbox-label {
 /* Keep the current job status distinct from actions and previous sync details. */
 .sender-sync-status {
     box-sizing: border-box;
-    width: 100%;
+    width: fit-content;
+    max-width: 100%;
     margin-bottom: 20px;
     padding: 16px 20px;
     border-left: 4px solid #2271b1;
@@ -847,6 +918,180 @@ label.sender-checkbox-label {
     background: #f0f6fc;
     line-height: 1.6;
     overflow-wrap: anywhere;
+}
+
+#sender-store-tools {
+    width: 100%;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.sender-tools-tabs {
+    display: flex;
+    border-bottom: 1px solid #dcdcde;
+    background: #f9fafb;
+}
+
+.sender-tools-tab {
+    appearance: none;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: #50575e;
+    padding: 16px 22px;
+    margin: 0;
+    min-height: 52px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.sender-tools-tab[aria-selected="true"] {
+    color: #1d2327;
+    border-bottom-color: #ff8800;
+    background: #fff;
+}
+
+.sender-tools-tab:hover {
+    color: #1d2327;
+    background: #fff;
+}
+
+.sender-tools-tab:focus-visible {
+    outline: 2px solid #2271b1;
+    outline-offset: -5px;
+}
+
+.sender-tools-panel {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 32px 40px;
+}
+
+#sender-form-settings {
+    margin: 0;
+}
+
+.sender-panel-title {
+    margin: 0 0 24px;
+    font-size: 21px;
+    line-height: 1.4;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.sender-tools-panel .sender-options,
+.sender-tools-panel .sender-note {
+    max-width: 820px;
+}
+
+.sender-settings-save {
+    padding: 0 40px 32px;
+}
+
+.sender-preferences-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px;
+    align-items: start;
+}
+
+.sender-preferences-section {
+    min-width: 0;
+}
+
+.sender-preferences-section h3 {
+    margin: 0 0 20px;
+    font-size: 17px;
+    line-height: 1.5;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+@media (max-width: 1100px) {
+    .sender-preferences-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 32px;
+    }
+}
+
+.sender-store-update {
+    max-width: 640px;
+    margin: 0 0 24px;
+    padding: 18px 20px;
+    border-left: 3px solid #dba617;
+    border-radius: 3px;
+    background: #fcf9e8;
+}
+
+.sender-store-update[data-status="running"] {
+    border-left-color: #2271b1;
+    background: #f0f6fc;
+}
+
+#sender-store-tools [hidden] {
+    display: none !important;
+}
+
+
+
+.sender-cart-update-panel .sender-header {
+    margin: 0 0 16px;
+}
+
+.sender-cart-update-panel p {
+    margin: 0 0 16px;
+    line-height: 1.6;
+}
+
+.sender-cart-update-description,
+.sender-cart-update-panel .sender-note {
+    color: #646970;
+}
+
+.sender-cart-update-panel .sender-note {
+    display: block;
+    margin-left: 0;
+}
+
+.sender-cart-update-panel[data-status="completed"] #sender-cart-update-message {
+    color: #008a20;
+    margin-bottom: 0;
+}
+
+.sender-cart-update-panel [hidden] {
+    display: none !important;
+}
+
+@media (max-width: 782px) {
+    .sender-tools-panel {
+        padding: 20px;
+    }
+    .sender-settings-save {
+        padding: 0 20px 20px;
+    }
+    .sender-settings-layout > div.sender-account-card {
+        padding: 20px;
+        gap: 20px;
+    }
+    .sender-panel-title {
+        font-size: 19px;
+    }
+}
+
+@media (max-width: 600px) {
+    .sender-tools-tab {
+        flex: 0 0 auto;
+        min-width: 0;
+        padding: 14px 16px;
+        font-size: 13px;
+    }
+    .sender-tools-tabs {
+        overflow-x: auto;
+    }
 }
 
 .sender-sync-status-title {

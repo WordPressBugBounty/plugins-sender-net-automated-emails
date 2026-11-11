@@ -75,6 +75,12 @@ class Sender_Automated_Emails
         $this->senderEnqueueStyles();
         $this->senderCreateSettingsTemplates();
 
+        // Connection settings can be saved later in this request, after init.
+        if ($this->senderIsWooEnabled()) {
+            require_once __DIR__ . '/Sender_Cart_Recovery_Sync.php';
+            new Sender_Cart_Recovery_Sync($this->senderApi);
+        }
+
         if (!$this->senderApiKey() || get_option('sender_account_disconnected')) {
             return;
         }

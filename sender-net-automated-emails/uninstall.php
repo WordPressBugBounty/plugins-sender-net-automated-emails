@@ -33,9 +33,16 @@ $availableSettings = [
     'sender_subscribe_to_newsletter_string',
     'sender_subscribe_label',
     'sender_forms_data_last_update',
+    'sender_cart_recovery_sync',
 ];
 
 global $wpdb;
+
+require_once __DIR__ . '/includes/Sender_Repository.php';
+if (!(new Sender_Repository())->rememberNextCartId()) {
+    wp_die(__('Could not preserve Sender cart IDs. Please retry deleting the plugin.', 'sender-net-automated-emails'));
+}
+wp_clear_scheduled_hook('sender_sync_cart_recovery_urls');
 
 $senderApi = new Sender_API();
 $senderApi->senderDeleteStore();

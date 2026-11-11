@@ -6,6 +6,36 @@ if (!defined('ABSPATH')) {
 
 class Sender_Repository
 {
+    // Intentionally survives uninstall: Sender may still retain carts with these IDs.
+    const NEXT_CART_ID_OPTION = 'sender_next_cart_id';
+
+    public function rememberNextCartId()
+    {
+        global $wpdb;
+        $table = $wpdb->prefix . 'sender_automated_emails_carts';
+        $exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table)));
+        if ($wpdb->last_error !== '') {
+            return false;
+        }
+        if (!$exists) {
+            return true;
+        }
+        // SHOW TABLE STATUS can return a cached counter on MySQL 8.
+        $definition = $wpdb->get_row("SHOW CREATE TABLE `{$table}`", ARRAY_N);
+        if (!$definition || strpos($definition[1], 'AUTO_INCREMENT') === false) {
+            return false;
+        }
+        $next = preg_match('/\bAUTO_INCREMENT=(\d+)/', $definition[1], $matches) ? (int) $matches[1] : 1;
+        $saved = $wpdb->query($wpdb->prepare(
+            "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')
+             ON DUPLICATE KEY UPDATE option_value = GREATEST(CAST(option_value AS UNSIGNED), CAST(VALUES(option_value) AS UNSIGNED)), autoload = 'no'",
+            self::NEXT_CART_ID_OPTION, (string) $next
+        ));
+        wp_cache_delete(self::NEXT_CART_ID_OPTION, 'options');
+        wp_cache_delete('notoptions', 'options');
+        return $saved !== false;
+    }
+
     public function senderCreateTables()
     {
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -19,6 +49,7 @@ class Sender_Repository
         }
 
         $sender_carts = $wpdb->prefix . 'sender_automated_emails_carts';
+        $nextCartId = max(1, (int) get_option(self::NEXT_CART_ID_OPTION, 1));
 
         $cartsSql = "CREATE TABLE IF NOT EXISTS $sender_carts (
                              `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -29,7 +60,7 @@ class Sender_Repository
                              `created` int(11) NOT NULL,
                              `updated` int(11) NOT NULL,
                              PRIMARY KEY (`id`)
-                             ) $wcap_collate";
+                             ) $wcap_collate AUTO_INCREMENT=$nextCartId";
 
         $wpdb->query($cartsSql);
 

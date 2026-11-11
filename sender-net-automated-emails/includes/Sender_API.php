@@ -14,6 +14,23 @@ class Sender_API
     private $senderBaseUrl = 'https://api.sender.net/v2/';
     private $senderStatsBaseUrl = 'https://stats.sender.net/commerce/';
     private $accountRequestError = null;
+    private $cartRecoveryRequestError = [];
+
+    public function getCartRecoveryRequestError()
+    {
+        return $this->cartRecoveryRequestError;
+    }
+
+    private function recordCartRecoveryResponse($response, $expectedStatus)
+    {
+        $status = is_wp_error($response) ? 0 : (int) wp_remote_retrieve_response_code($response);
+        // Never retain response bodies, transport messages, headers or recovery credentials.
+        $this->cartRecoveryRequestError = [
+            'reason' => is_wp_error($response) ? 'transport_error'
+                : ($status === $expectedStatus ? 'invalid_response' : 'http_error'),
+            'http_status' => $status,
+        ];
+    }
 
     public function __construct()
     {
@@ -392,6 +409,9 @@ class Sender_API
     /** Send a small product-price event; the API updates matching carts in the background. */
     public function senderSyncCartPrices(array $payload)
     {
+        if (empty($payload['products']) || !is_array($payload['products'])) {
+            return false;
+        }
         $body = wp_json_encode($payload);
         if ($body === false || strlen($body) > 262144 || count($payload['products']) > 25) {
             return false;
@@ -414,6 +434,67 @@ class Sender_API
         return is_array($data)
             && ($data['success'] ?? false) === true
             && ($data['accepted'] ?? null) === count($payload['products']);
+    }
+
+    public function senderGetCartRecoveryCandidates($cursor = null)
+    {
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/wordpress/cart-recovery-candidates',
+            array_merge($this->senderBaseRequestArguments(), [
+                'body' => wp_json_encode(['cursor' => $cursor]), 'timeout' => 15, 'redirection' => 0,
+            ])
+        );
+        $this->recordCartRecoveryResponse($response, 200);
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            return false;
+        }
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_array($data) || array_diff(array_keys($data), ['ids', 'cursor'])
+            || !isset($data['ids']) || !is_array($data['ids']) || count($data['ids']) > 100
+            || array_values($data['ids']) !== $data['ids'] || !array_key_exists('cursor', $data)
+            || ($data['cursor'] !== null && (!is_string($data['cursor']) || $data['cursor'] === ''
+                || strlen($data['cursor']) > 2048 || $data['cursor'] === $cursor))) {
+            return false;
+        }
+        foreach ($data['ids'] as $id) {
+            if (!is_string($id) || !preg_match('/\A[1-9][0-9]*\z/', $id) || (string) (int) $id !== $id) {
+                return false;
+            }
+        }
+        if (count(array_unique($data['ids'])) !== count($data['ids'])) {
+            return false;
+        }
+        $this->cartRecoveryRequestError = [];
+        return $data;
+    }
+
+    public function senderSyncCartRecoveryUrls(array $payload)
+    {
+        $this->cartRecoveryRequestError = ['reason' => 'invalid_payload', 'http_status' => 0];
+        if (empty($payload['carts']) || !is_array($payload['carts'])) {
+            return false;
+        }
+        $body = wp_json_encode($payload);
+        if ($body === false || strlen($body) > 262144 || count($payload['carts']) > 100) {
+            return false;
+        }
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/wordpress/cart-recovery-urls',
+            array_merge($this->senderBaseRequestArguments(), [
+                'body' => $body, 'timeout' => 15, 'redirection' => 0,
+            ])
+        );
+        $this->recordCartRecoveryResponse($response, 202);
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 202) {
+            return false;
+        }
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        $accepted = is_array($data) && ($data['success'] ?? false) === true
+            && ($data['accepted'] ?? null) === count($payload['carts']);
+        if ($accepted) {
+            $this->cartRecoveryRequestError = [];
+        }
+        return $accepted;
     }
 
     public function senderExportData($exportData)
