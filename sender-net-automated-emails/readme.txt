@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.12.0
+Stable tag: 2.12.1
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -480,3 +480,10 @@ purchased
 * Secured abandoned cart recovery with signed links and customer ownership checks.
 * Added authenticated synchronization of signed recovery links for existing carts, selected by Sender.
 * Improved the settings layout and added a support ZIP with debug information, sync logs, and store update status.
+= 2.12.1 2026-11-20 =
+* Added authenticated sync diagnostics and job-specific cancellation for support recovery.
+* Import callbacks now distinguish a newly scheduled sync from an existing job.
+* Fixed unauthorized changes to saved carts through checkout email capture by requiring cart ownership.
+* Added store identification to cart deletion requests for accounts with multiple connected stores.
+* Protected order confirmation callbacks with order ownership checks.
+* Improved cart tracking retries and newsletter consent persistence.

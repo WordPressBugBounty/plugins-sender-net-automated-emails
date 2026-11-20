@@ -745,7 +745,6 @@ class Sender_WooCommerce
 
     public function exportCustomers()
     {
-        global $wpdb;
         $chunkSize = 200;
 
         #Extract customers which completed order

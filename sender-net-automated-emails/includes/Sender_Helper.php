@@ -6,16 +6,16 @@ if (!defined('ABSPATH')) {
 
 class Sender_Helper
 {
-    public static function submittedNewsletterConsent(): ?bool
+    public static function submittedNewsletterConsent(string $field = 'sender_newsletter', string $changedField = 'sender_newsletter_changed'): ?bool
     {
-        if (!isset($_POST['sender_newsletter']) || !is_scalar($_POST['sender_newsletter'])) {
+        if (!isset($_POST[$field]) || !is_scalar($_POST[$field])) {
             return null;
         }
-        if ((string) $_POST['sender_newsletter'] === '1') {
+        if ((string) $_POST[$field] === '1') {
             return true;
         }
         // Classic checkout always posts a hidden zero, even for an untouched box.
-        return isset($_POST['sender_newsletter_changed']) && $_POST['sender_newsletter_changed'] === '1'
+        return isset($_POST[$changedField]) && is_scalar($_POST[$changedField]) && (string) $_POST[$changedField] === '1'
             ? false : null;
     }
 
@@ -44,6 +44,7 @@ class Sender_Helper
     CONST SENDER_CART_META = 'sender_remote_id';
 
     const SENDER_CART_DATA = '_sender_cart_data';
+    const SENDER_CART_TRACK_PENDING = '_sender_cart_track_pending';
 
     const ORDER_NOT_PAID_STATUSES = [
         self::ORDER_ON_HOLD,
@@ -112,27 +113,31 @@ class Sender_Helper
 
     private static function hasExpiredCancellation(array $state): bool
     {
+        $requestedAt = self::getSyncCancellationRequestedAt($state);
+        return $requestedAt !== null && $requestedAt > 0 && time() - $requestedAt >= self::SYNC_CANCELLATION_TIMEOUT;
+    }
+
+    /** Resolve the cancellation time without recovering or writing sync state. */
+    public static function getSyncCancellationRequestedAt(array $state): ?int
+    {
         if (isset($state['cancel_requested_at'])) {
             $requestedAt = $state['cancel_requested_at'];
             if (!is_int($requestedAt) && !(is_string($requestedAt) && ctype_digit($requestedAt))) {
-                return false;
+                return null;
             }
-            $requestedAt = (int) $requestedAt;
-        } else {
-            // Existing installations only stored a WordPress-local date. Convert
-            // it using the site's timezone so those stuck jobs recover on update.
-            $updatedAt = $state['updated_at'] ?? null;
-            if (!is_string($updatedAt)) {
-                return false;
-            }
-            $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $updatedAt, new DateTimeZone('UTC'));
-            if (!$date || $date->format('Y-m-d H:i:s') !== $updatedAt) {
-                return false;
-            }
-            $requestedAt = (int) get_gmt_from_date($updatedAt, 'U');
+            return (int) $requestedAt > 0 ? (int) $requestedAt : null;
         }
 
-        return $requestedAt > 0 && time() - $requestedAt >= self::SYNC_CANCELLATION_TIMEOUT;
+        // Legacy dates are site-local; explicit null follows this worker fallback too.
+        $updatedAt = self::validateSyncDate($state['updated_at'] ?? null);
+        return $updatedAt !== null ? (int) get_gmt_from_date($updatedAt, 'U') : null;
+    }
+
+    public static function validateSyncDate($value): ?string
+    {
+        if (!is_string($value) || strpos($value, "\0") !== false) return null;
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, new DateTimeZone('UTC'));
+        return $date && $date->format('Y-m-d H:i:s') === $value ? $value : null;
     }
 
     public static function queueSyncJob($delay, $existingOnly = false)

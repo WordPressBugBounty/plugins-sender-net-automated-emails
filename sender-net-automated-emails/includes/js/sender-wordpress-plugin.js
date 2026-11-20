@@ -46,7 +46,8 @@ jQuery(document).ready(function () {
             email: emailValue,
             firstname: checkoutName('input#billing_first_name', 'input#billing-first_name', 'input#shipping-first_name'),
             lastname: checkoutName('input#billing_last_name', 'input#billing-last_name', 'input#shipping-last_name'),
-            newsletter: jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0 ? 1 : 0
+            newsletter: jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0 ? 1 : 0,
+            newsletter_changed: lastNewsletterChoice !== null ? 1 : 0
         };
         var captured = JSON.stringify(data);
         if (captured === lastCaptured) {

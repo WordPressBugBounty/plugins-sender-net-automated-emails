@@ -22,6 +22,8 @@ class Sender_Webhooks
     const TOPIC_GET_CUSTOMERS_BY_ID = 'get-customers-by-id';
     const TOPIC_GET_CUSTOMERS_BY_EMAIL = 'get-customers-by-email';
     const TOPIC_PLUGIN_VERSION = 'get-plugin-version';
+    const TOPIC_SHOP_SYNC_STATUS = 'get-shop-sync-status';
+    const TOPIC_CANCEL_SHOP_SYNC = 'cancel-shop-sync';
 
     public function __construct($sender)
     {
@@ -34,7 +36,8 @@ class Sender_Webhooks
         $receivedApiKey = $request->get_header('sender-api-key');
         $storedApiKey = get_option('sender_api_key');
 
-        if ($receivedApiKey === $storedApiKey) {
+        if (is_string($storedApiKey) && $storedApiKey !== '' && is_string($receivedApiKey)
+            && hash_equals($storedApiKey, $receivedApiKey)) {
             return true;
         } else {
             $data = $request->get_json_params();
@@ -77,6 +80,12 @@ class Sender_Webhooks
                     return $this->get_customers_by_email($data);
                 case self::TOPIC_PLUGIN_VERSION:
                     return $this->get_plugin_version();
+                case self::TOPIC_SHOP_SYNC_STATUS:
+                    require_once __DIR__ . '/Sender_Shop_Sync_Support.php';
+                    return Sender_Shop_Sync_Support::status();
+                case self::TOPIC_CANCEL_SHOP_SYNC:
+                    require_once __DIR__ . '/Sender_Shop_Sync_Support.php';
+                    return Sender_Shop_Sync_Support::cancel($data);
                 default:
                     return new WP_REST_Response(['error' => 'Invalid webhook topic.'], 400);
             }
@@ -106,7 +115,13 @@ class Sender_Webhooks
             return new WP_REST_Response(['error' => 'Shop sync could not be scheduled.'], 503);
         }
 
-        $response = ['message' => __('Started importing wordpress shop data')];
+        $newJob = !empty($state['job_id']) && ($state['job_id'] !== ($previousState['job_id'] ?? null));
+        $message = __('Started importing wordpress shop data');
+        if (!$newJob && in_array($state['status'], ['running', 'queued'], true)) {
+            $message = $state['status'] === 'running' ? __('Shop sync is already running.') : __('Shop sync is already queued.');
+        }
+        $response = ['message' => $message, 'job_id' => $state['job_id'] ?? null,
+            'status' => $state['status'], 'started_new_job' => $newJob];
         return new WP_REST_Response($response, 200);
     }
 
@@ -238,50 +253,41 @@ class Sender_Webhooks
             return new WP_REST_Response(['error' => 'Field emails is required.'], 400);
         }
 
-        $customer_emails = array_filter(array_map('sanitize_email', $data['emails']));
+        $customer_emails = array_unique(array_filter(array_map(static function ($email) {
+            return is_string($email) ? sanitize_email(strtolower($email)) : '';
+        }, $data['emails'])));
 
         if (empty($customer_emails)) {
             return new WP_REST_Response(['error' => 'No valid email provided'], 400);
         }
 
-        global $wpdb;
-
-        $email_list = "'" . implode("', '", $customer_emails) . "'";
-        $customerResults = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT p.ID AS post_id, pm1.meta_value AS billing_first_name, pm2.meta_value AS billing_last_name, pm3.meta_value AS email_marketing_consent,
-       pm4.meta_value AS billing_email
-        FROM {$wpdb->prefix}posts AS p
-        LEFT JOIN {$wpdb->prefix}postmeta AS pm1 ON p.ID = pm1.post_id AND pm1.meta_key = '_billing_first_name'
-        LEFT JOIN {$wpdb->prefix}postmeta AS pm2 ON p.ID = pm2.post_id AND pm2.meta_key = '_billing_last_name'
-        LEFT JOIN {$wpdb->prefix}postmeta AS pm3 ON p.ID = pm3.post_id AND pm3.meta_key = 'email_marketing_consent'
-        LEFT JOIN {$wpdb->prefix}postmeta AS pm4 ON p.ID = pm4.post_id AND pm4.meta_key = '_billing_email'
-        WHERE p.post_type = 'shop_order' AND p.ID IN (
-            SELECT pm.post_id 
-            FROM {$wpdb->prefix}postmeta AS pm 
-            WHERE pm.meta_key = '_billing_email' AND pm.meta_value IN ($email_list)
-        )"
-            )
-        );
-
-
         $customers = [];
-        foreach ($customerResults as $customer) {
-            $email = $customer->billing_email;
-            $firstname = $customer->billing_first_name;
-            $lastname = $customer->billing_last_name;
-            $emailConsent = !empty($customer->email_marketing_consent)
-                ? maybe_unserialize($customer->email_marketing_consent)
-                : '';
+        foreach ($customer_emails as $email) {
+            // Read the same profile that update_customer_by_email writes.
+            $customer = get_user_by('email', $email);
+            if ($customer) {
+                $firstname = $customer->first_name;
+                $lastname = $customer->last_name;
+                $emailConsent = get_user_meta($customer->ID, Sender_Helper::EMAIL_MARKETING_META_KEY, true);
+            } else {
+                // One guest profile per email, from the latest order in the active Woo storage.
+                $orders = function_exists('wc_get_orders') ? wc_get_orders([
+                    'billing_email' => $email, 'type' => 'shop_order',
+                    'limit' => 1, 'orderby' => 'ID', 'order' => 'DESC',
+                ]) : [];
+                $order = $orders ? reset($orders) : false;
+                if (!$order) continue;
+                $firstname = $order->get_billing_first_name();
+                $lastname = $order->get_billing_last_name();
+                $emailConsent = $order->get_meta(Sender_Helper::EMAIL_MARKETING_META_KEY, true);
+            }
 
-            $customer_data = [
+            $customers[] = [
                 'email' => $email,
                 Sender_Helper::EMAIL_MARKETING_META_KEY => $emailConsent,
                 'firstname' => $firstname,
                 'lastname' => $lastname,
             ];
-
-            $customers[] = $customer_data;
         }
 
         if (empty($customers)){

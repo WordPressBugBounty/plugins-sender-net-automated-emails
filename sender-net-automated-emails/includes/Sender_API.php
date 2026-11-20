@@ -183,6 +183,10 @@ class Sender_API
     public function senderDeleteCart($wpCartId)
     {
         $data = ['resource_key' => $this->senderGetResourceKey()];
+        $storeId = get_option('sender_store_register');
+        if ($storeId) {
+            $data['store_id'] = (string) $storeId;
+        }
         $params = array_merge($this->senderBaseRequestArguments(true), ['body' => json_encode($data)]);
         $response = $this->sender_remote_request(
             $this->senderStatsBaseUrl . 'carts/' . $wpCartId,
@@ -205,7 +209,7 @@ class Sender_API
         return $this->senderBuildStatsResponse($response);
     }
 
-    public function senderTrackRegisteredUsers($userId)
+    public function senderTrackRegisteredUsers($userId, array $checkoutData = [])
     {
         $user = get_userdata($userId);
         if (!$user) {
@@ -255,7 +259,17 @@ class Sender_API
                 $data['list_id'] = $list;
             }
 
-            if ((int) $userId === get_current_user_id() && isset($_POST['sender_newsletter'])) {
+            if ((int) $userId === get_current_user_id()) {
+                foreach (['firstname', 'lastname'] as $field) {
+                    if (isset($checkoutData[$field])) {
+                        $data[$field] = $checkoutData[$field];
+                    }
+                }
+            }
+
+            if ((int) $userId === get_current_user_id() && array_key_exists('newsletter', $checkoutData)) {
+                $data['newsletter'] = (bool) $checkoutData['newsletter'];
+            } elseif ((int) $userId === get_current_user_id() && isset($_POST['sender_newsletter'])) {
                 // A callback can still carry older consent while checkout is running.
                 // Never let it override this customer's explicitly submitted choice.
                 $newsletter = Sender_Helper::submittedNewsletterConsent();

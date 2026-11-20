@@ -23,6 +23,17 @@ class Sender_Cart extends Sender_Model
 
     protected $updated;
 
+    /** Delete only if this cart is still open and belongs to the same owner. */
+    public function deleteIfOpen(): bool
+    {
+        global $wpdb;
+        return $wpdb->delete($this->getTableName(), [
+            'id' => $this->id,
+            'user_id' => $this->user_id,
+            'cart_status' => 0,
+        ], ['%d', '%d', '%d']) === 1;
+    }
+
     /** Recovery links are bearer credentials bound to this site, cart and owner. */
     public function getRecoveryToken()
     {

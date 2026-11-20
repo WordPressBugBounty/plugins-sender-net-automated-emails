@@ -5,10 +5,13 @@ if (!defined('ABSPATH')) {
 }
 
 require_once 'Sender_Helper.php';
+require_once __DIR__ . '/Sender_Order_Confirmation.php';
+require_once __DIR__ . '/Sender_Guest_Cart_Session.php';
 
 class Sender_Carts
 {
     private $sender;
+    private $guestSession;
     private $senderUserId = false;
     private $inSenderCartUpdated = false;
     private $renderedConvertCartScripts = [];
@@ -25,6 +28,10 @@ class Sender_Carts
     const SENDER_SUBSCRIBER_ID = 'sender_subscriber_id';
     const SENDER_ACTIVE_CART_SESSION_KEY = 'sender_active_cart_id';
     const SENDER_RECOVERED_CART_SESSION_KEY = 'sender_verified_recovery';
+    const SENDER_OWNED_CART_SESSION_KEY = 'sender_owned_cart';
+    const SENDER_ORDER_CART_PROOF_META = '_sender_verified_session_cart';
+    const SENDER_PENDING_CART_TRACK_SESSION_KEY = 'sender_pending_cart_track';
+    const SENDER_PREVIOUS_CARTS_SESSION_KEY = 'sender_previous_carts';
     const NEWSLETTER_CHECKBOX_ID = 'sender-newsletter-checkbox-subscribe';
     const NEWSLETTER_BLOCK_NAME = 'sender-net-automated-emails/subscribe-newsletter-block';
     const CHECKOUT_CONTACT_BLOCK_NAME = 'woocommerce/checkout-contact-information-block';
@@ -32,6 +39,7 @@ class Sender_Carts
     public function __construct($sender)
     {
         $this->sender = $sender;
+        $this->guestSession = new Sender_Guest_Cart_Session();
 
         $this->senderAddCartsActions()
                 ->senderAddCartsFilters();
@@ -40,7 +48,10 @@ class Sender_Carts
     private function senderAddCartsActions()
     {
         //Handle cart changes and convert
+        add_action('woocommerce_checkout_create_order', [$this, 'senderBindSessionCartToOrder'], 20, 1);
+        add_action('woocommerce_store_api_checkout_update_order_meta', [$this, 'senderBindSessionCartToOrder'], 20, 1);
         add_action('woocommerce_checkout_order_processed', [$this, 'senderLoadOrderForConvert'], 10, 1);
+        add_action('woocommerce_order_status_changed', [$this, 'senderUpdateOrderStatus'], 10, 3);
         add_action('woocommerce_payment_complete', [$this, 'senderHandlePaidOrder'], 10, 1);
         add_action('woocommerce_subscription_payment_complete', [$this, 'senderHandlePaidOrder'], 10, 1);
         add_action('woocommerce_subscription_renewal_payment_complete', [$this, 'senderHandleRenewalPaymentComplete'], 10, 2);
@@ -49,7 +60,7 @@ class Sender_Carts
         add_action('woocommerce_cart_updated', [$this, 'senderCartUpdated']);
 
         // Normal flow: thankyou page
-        add_action('woocommerce_thankyou', [$this, 'senderConvertCart'], 5, 1);
+        add_action('woocommerce_thankyou', [$this, 'senderConvertThankYouCart'], 5, 1);
         add_action('woocommerce_thankyou', [$this, 'outputConvertCartScript'], 20, 1);
 
         // AJAX ping to confirm JS executed
@@ -83,10 +94,6 @@ class Sender_Carts
         //Recovered cart visit
         add_action('wp_head', [$this, 'outputSenderTrackVisitorsScript']);
 
-        if (is_admin()) {
-            add_action('woocommerce_order_status_changed', [$this, 'senderUpdateOrderStatus'], 10, 3);
-        }
-
         return $this;
     }
 
@@ -97,9 +104,11 @@ class Sender_Carts
         return $this;
     }
 
-    public function senderWpNewsletterHandle($userId):void
+    public function senderWpNewsletterHandle($userId, ?bool $newsletter = null):void
     {
-        $newsletter = Sender_Helper::submittedNewsletterConsent();
+        if ($newsletter === null) {
+            $newsletter = Sender_Helper::submittedNewsletterConsent();
+        }
         // An untouched unchecked box does not revoke consent given elsewhere.
         if ($newsletter === null) {
             return;
@@ -110,31 +119,27 @@ class Sender_Carts
         }
         $email = strtolower($user->user_email);
 
-        if ($newsletter) {
-            update_user_meta($userId, 'email_marketing_consent', Sender_Helper::generateEmailMarketingConsent(Sender_Helper::SUBSCRIBED));
-            $payload = ['subscriber_status' => Sender_Helper::UPDATE_STATUS_ACTIVE];
-        } else {
-            update_user_meta(
-                    $userId,
-                    Sender_Helper::EMAIL_MARKETING_META_KEY,
-                    Sender_Helper::generateEmailMarketingConsent(Sender_Helper::UNSUBSCRIBED)
-            );
-            $payload = ['subscriber_status' => Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED];
-        }
+        $consentStatus = $newsletter ? Sender_Helper::SUBSCRIBED : Sender_Helper::UNSUBSCRIBED;
+        update_user_meta(
+                $userId,
+                Sender_Helper::EMAIL_MARKETING_META_KEY,
+                Sender_Helper::generateEmailMarketingConsent($consentStatus)
+        );
+        $payload = [
+                'subscriber_status' => $newsletter ? Sender_Helper::UPDATE_STATUS_ACTIVE : Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED,
+        ];
         // Keep the legacy fallback consistent with the explicit choice as well.
         update_user_meta($userId, 'sender_newsletter', $newsletter ? 1 : 0);
 
-        if (isset($payload)) {
-            if (function_exists('as_enqueue_async_action')) {
-                as_enqueue_async_action(
-                        'sender_update_customer_background',
-                        [$email, $payload]
-                );
-            }
+        if (function_exists('as_enqueue_async_action')) {
+            as_enqueue_async_action(
+                    'sender_update_customer_background',
+                    [$email, $payload]
+            );
         }
     }
 
-    public function handleGuestConvertCart($order)
+    public function handleGuestConvertCart($order, bool $updateCart = true)
     {
         $billingEmail = $order->get_billing_email();
         if (!empty($billingEmail)) {
@@ -164,7 +169,18 @@ class Sender_Carts
             }
 
             $this->sender->senderApi->senderTrackNotRegisteredUsers($visitorData);
-            $this->senderCartUpdated();
+            // Checkout may update a cart that this session already owns. If capture has
+            // never tracked one, it can stay local until the customer pays.
+            if ($updateCart) {
+                if (is_user_logged_in()) {
+                    $this->senderCartUpdated();
+                } else {
+                    $update = $this->withGuestCartSession(function () {
+                        return $this->updateSessionCart(true);
+                    });
+                    $this->sendShoppingCart($update);
+                }
+            }
 
             return true;
         }else{
@@ -186,21 +202,74 @@ class Sender_Carts
         return $this->senderConvertCart($orderId);
     }
 
-    private function isConversionPrepared($order = null): bool
+    private function withGuestCartSession(callable $operation)
     {
-        if ($order) {
-            $cartId = $order->get_meta(Sender_Helper::SENDER_CART_META, true);
-            return $cartId && (bool) (new Sender_Cart())->find($cartId);
+        $wc = $this->senderGetWoo();
+        return $this->guestSession->run($wc ? $wc->session : null, $operation);
+    }
+
+    /** Keep the session's cart identity before payment can outlive the session. */
+    public function senderBindSessionCartToOrder($order): void
+    {
+        if (!$order instanceof WC_Order || $order->get_meta(Sender_Helper::SENDER_CART_META, true)) {
+            return;
         }
+        $wc = $this->senderGetWoo();
+        $this->guestSession->refresh($wc ? $wc->session : null);
+        $cart = is_user_logged_in()
+            ? $this->senderFindActiveCart($this->senderFindCurrentUser())
+            : $this->senderFindOwnedSessionCart();
+        if (!$this->senderCartOwnerMatchesOrderEmail($cart, $order)) {
+            return;
+        }
+        // Separate proof from conversion preparation; the order is still unpaid.
+        $order->update_meta_data(self::SENDER_ORDER_CART_PROOF_META, $cart->getRecoveryToken());
+        $this->senderCopyPendingTrackingToOrder($order, $cart);
+        // WooCommerce saves buffered metadata with a new order; existing orders
+        // can persist it immediately without creating or saving the order here.
+        if ($order->get_id()) {
+            $order->save_meta_data();
+        }
+    }
+
+    private function senderFindOrderSessionCart($order)
+    {
+        $cart = $this->senderFindRecoveryCart($order->get_meta(self::SENDER_ORDER_CART_PROOF_META, true));
+        return $this->senderCartOwnerMatchesOrderEmail($cart, $order) ? $cart : null;
+    }
+
+    private function senderCartOwnerMatchesOrderEmail($cart, $order): bool
+    {
+        $owner = $cart ? (new Sender_User())->find($cart->user_id) : null;
+        return $owner && strtolower((string) $owner->email) === strtolower((string) $order->get_billing_email());
+    }
+
+    private function senderCopyPendingTrackingToOrder($order, $cart): void
+    {
+        if (WC()->session && (int) WC()->session->get(self::SENDER_PENDING_CART_TRACK_SESSION_KEY) === (int) $cart->id) {
+            $order->update_meta_data(Sender_Helper::SENDER_CART_TRACK_PENDING, $cart->id);
+        }
+    }
+
+    private function orderHasLinkedCart($order): bool
+    {
+        $id = $order->get_meta(Sender_Helper::SENDER_CART_META, true);
+        return $id && (bool) (new Sender_Cart())->find($id);
+    }
+
+    private function cartUpdatesPaused(): bool
+    {
         return $this->preparedOrderId > 0 || WC()->session && (int) WC()->session->get(Sender_Helper::TRANSIENT_PREPARE_CONVERT, 0) > time();
     }
 
     public function prepareConvertCart($order)
     {
-        $orderId = $order->get_id();
-        if ($this->isConversionPrepared($order)) {
-            return true;
-        }
+        if ($this->orderHasLinkedCart($order)) return true;
+        // The shopper may have started another cart since this order saved its proof.
+        $orderCart = $this->senderFindOrderSessionCart($order);
+        $liveCart = $this->senderFindOwnedSessionCart();
+        $differentLiveCart = $orderCart && $liveCart && (int) $orderCart->id !== (int) $liveCart->id;
+        $previousUserId = $this->senderUserId;
         if (is_user_logged_in()) {
             $currentUser = wp_get_current_user();
             $senderUser = (new Sender_User())->findBy('email', strtolower($currentUser->user_email));
@@ -210,43 +279,32 @@ class Sender_Carts
                 }
 
                 $senderUser = (new Sender_User())->findBy('email', strtolower($currentUser->user_email));
-            }else{
+            } elseif (!$differentLiveCart) {
                 $this->senderCartUpdated();
             }
+        } else {
+            if (!$this->handleGuestConvertCart($order, false)) return false;
+            $senderUser = (new Sender_User())->findBy('email', strtolower($order->get_billing_email()));
         }
-        else{
-            if ($order) {
-                if (!$this->handleGuestConvertCart($order)){
-                    return false;
-                }
 
-                $senderUser = (new Sender_User())->findBy('email', strtolower($order->get_billing_email()));
+        if (!$senderUser) {
+            return false;
+        }
+
+        $update = $this->withGuestCartSession(function () use ($order, $senderUser) {
+            return $this->linkCartToOrder($order, $senderUser);
+        });
+        if (!$update) {
+            $this->senderUserId = $previousUserId;
+            // Checkout already saved the verified identity. The existing fallback
+            // can finish binding after a busy session writer releases the cart.
+            if ($this->senderFindOrderSessionCart($order)) {
+                $this->scheduleThankYouFallbackCheck($order->get_id());
             }
-        }
-
-        if (!isset($senderUser)) {
             return false;
         }
 
-        $cart = (new Sender_Cart())->findByAttributes(
-                [
-                        'user_id' => $senderUser->id,
-                        'cart_status' => 0
-                ],
-                'created DESC'
-        );
-
-        if(!$cart || $cart->cart_status === (int) Sender_Helper::CONVERTED_CART){
-            return false;
-        }
-
-        // Reserve this exact cart for the order; preparation is not API success.
-        $cart->cart_status = Sender_Helper::UNPAID_CART;
-        $cart->save();
-        $order->update_meta_data(Sender_Helper::SENDER_CART_META, $cart->id);
-        $order->save_meta_data();
-        $this->preparedOrderId = $orderId;
-
+        $this->sendShoppingCart($update);
         $newsletter = Sender_Helper::submittedNewsletterConsent();
         if ($newsletter !== null) {
             $order->update_meta_data(
@@ -260,11 +318,51 @@ class Sender_Carts
             $this->trackUser();
         }
 
-        if (WC()->session) {
+        $liveCart = $this->senderFindOwnedSessionCart();
+        $differentLiveCart = $liveCart && (int) $liveCart->id !== (int) $order->get_meta(Sender_Helper::SENDER_CART_META, true);
+        if ($differentLiveCart) {
+            $this->senderUserId = $previousUserId;
+        } elseif (WC()->session) {
             WC()->session->set(Sender_Helper::TRANSIENT_PREPARE_CONVERT, time() + 300);
         }
 
         return true;
+    }
+
+    private function linkCartToOrder($order, $senderUser)
+    {
+        $cart = $this->senderFindOrderSessionCart($order) ?: $this->senderFindActiveCart($senderUser);
+        $liveCart = $this->senderFindOwnedSessionCart();
+        $differentLiveCart = $cart && $liveCart && (int) $cart->id !== (int) $liveCart->id;
+        $update = null;
+        if ($cart && !is_user_logged_in() && !$differentLiveCart) {
+            // Preserve a final quantity change while binding this same cart to the order.
+            $update = $this->updateSessionCart(true);
+            $order->update_meta_data(self::SENDER_ORDER_CART_PROOF_META, $cart->getRecoveryToken());
+        }
+        if (!$cart && !is_user_logged_in()) {
+            // Guest checkout may have unloaded the Woo session. Create from this
+            // order instead of selecting another guest's cart by billing email.
+            // Logged-in checkout retains its existing no-active-cart behavior.
+            $cart = $this->ensureSenderCartForOrder($order);
+        }
+
+        if(!$cart || $cart->cart_status === (int) Sender_Helper::CONVERTED_CART){
+            return false;
+        }
+
+        // Reserve this exact cart for the order; preparation is not API success.
+        $cart->cart_status = Sender_Helper::UNPAID_CART;
+        $cart->save();
+        $order->update_meta_data(Sender_Helper::SENDER_CART_META, $cart->id);
+        $this->senderCopyPendingTrackingToOrder($order, $cart);
+        $order->update_meta_data('_sender_checkout_store', (string) get_option('sender_store_register'));
+        $order->save_meta_data();
+        if (!$differentLiveCart) {
+            $this->preparedOrderId = $order->get_id();
+            $this->guestSession->reserved(WC()->session);
+        }
+        return isset($update['cart']) ? $update : true;
     }
 
     public function senderConvertCart($orderId)
@@ -274,7 +372,7 @@ class Sender_Carts
             return false;
         }
 
-        if (!$this->isConversionPrepared($order)){
+        if (!$this->orderHasLinkedCart($order)){
             if(!$this->prepareConvertCart($order)){
                 return false;
             }
@@ -381,10 +479,11 @@ class Sender_Carts
             set_transient(Sender_Helper::TRANSIENT_LOG_IN, 1, 0);
         }
 
-        if (WC()->session) {
+        $liveCart = $this->senderFindOwnedSessionCart();
+        if (WC()->session && (!$liveCart || (int) $liveCart->id === (int) $cart->id)) {
             WC()->session->__unset(Sender_Helper::TRANSIENT_PREPARE_CONVERT);
         }
-        $this->preparedOrderId = 0;
+        if ((int) $this->preparedOrderId === (int) $orderId) $this->preparedOrderId = 0;
         return true;
     }
 
@@ -398,11 +497,7 @@ class Sender_Carts
             return false;
         }
 
-        $storeId = get_option('sender_store_register') ?: '';
-        if (empty($storeId)){
-            $this->fixEmptyStoreRegistered();
-            $storeId = get_option('sender_store_register')?: '';
-        }
+        $storeId = $this->senderGetOrRegisterStoreId();
 
         $cartUrl = $cart->getRecoveryUrl();
 
@@ -421,7 +516,7 @@ class Sender_Carts
 
         $priceUpdatedAt = sprintf('%.6F', microtime(true));
 
-        foreach ($items as $item => $values) {
+        foreach ($items as $values) {
 
             $_product = wc_get_product($values['data']->get_id());
             $regularPrice = (float) $_product->get_regular_price();
@@ -441,16 +536,7 @@ class Sender_Carts
             $image_url = Sender_Helper::getProductImageUrl($_product);
             $description = Sender_Helper::getProductShortText($_product);
 
-            if ($_product->is_type('variation')) {
-                $sku = $_product->get_sku();
-                if (!$sku) {
-                    $parent_id = $_product->get_parent_id();
-                    $parent = wc_get_product($parent_id);
-                    $sku = $parent ? $parent->get_sku() : '';
-                }
-            } else {
-                $sku = $_product->get_sku();
-            }
+            $sku = $this->senderGetProductSku($_product);
 
             $prod = [
                     'sku' => (string) $sku,
@@ -474,9 +560,26 @@ class Sender_Carts
         return $data;
     }
 
-    private function fixEmptyStoreRegistered()
+    /** Preserve the existing registration repair only at callers that already require it. */
+    private function senderGetOrRegisterStoreId()
     {
-        $this->sender->senderHandleAddStore();
+        $storeId = get_option('sender_store_register') ?: '';
+        if (empty($storeId)) {
+            $this->sender->senderHandleAddStore();
+            $storeId = get_option('sender_store_register') ?: '';
+        }
+        return $storeId;
+    }
+
+    private function senderGetProductSku($product)
+    {
+        $isVariation = $product->is_type('variation');
+        $sku = $product->get_sku();
+        if ($isVariation && !$sku) {
+            $parent = wc_get_product($product->get_parent_id());
+            $sku = $parent ? $parent->get_sku() : '';
+        }
+        return $sku;
     }
 
     public function trackUser()
@@ -512,33 +615,40 @@ class Sender_Carts
      */
     public function senderCartUpdated()
     {
-        if (isset($_GET['hash'])) { return null; }
+        $update = $this->withGuestCartSession(function () {
+            return $this->updateSessionCart();
+        });
+        return $this->sendShoppingCart($update);
+    }
 
-        // prevent re-entrance / recursion
-        if ($this->inSenderCartUpdated) { return null; }
-
-        // If we already prepared conversion for this request/session, do not create/update carts
-        if ($this->isConversionPrepared()) {
-            return null;
-        }
-
+    private function updateSessionCart(bool $checkout = false)
+    {
+        if (isset($_GET['hash']) || $this->inSenderCartUpdated || $this->cartUpdatesPaused() || $this->guestSession->cartUpdateIsLate()) return null;
         $this->inSenderCartUpdated = true;
 
         try {
-            $hasIdentity = $this->senderUserId || $this->trackUser() || isset($_COOKIE[self::SENDER_SUBSCRIBER_ID]);
-
             $wc = $this->senderGetWoo();
             // Checkout can fire this hook after the shopper session has been unloaded.
-            if (!$wc->session) {
+            if (!$wc || !$wc->session || !isset($wc->cart) || !is_object($wc->cart)) {
                 return null;
             }
 
-            $items = $this->senderGetCart();
+            // An unreadable cart must not be treated as a customer emptying it.
+            try {
+                $items = $wc->cart->get_cart();
+            } catch (Throwable $e) {
+                return null;
+            }
+            if (!is_array($items)) {
+                return null;
+            }
             $cartData = serialize($items);
+            $hasIdentity = $this->senderUserId || (!empty($items) && $this->trackUser()) || isset($_COOKIE[self::SENDER_SUBSCRIBER_ID]);
 
             $senderUser = $this->senderFindCurrentUser();
             $cart = $this->senderFindActiveCart($senderUser);
 
+            if ($checkout && (!$cart || !$items)) return null;
             if (!$hasIdentity && !($cart instanceof Sender_Cart)) {
                 return null;
             }
@@ -548,16 +658,15 @@ class Sender_Carts
                 if (function_exists('is_order_received_page') && is_order_received_page()) {
                     return null;
                 }
-                if ($this->isConversionPrepared()) {
+                if ($this->cartUpdatesPaused()) {
                     return null;
                 }
 
-                if ($cart instanceof Sender_Cart) {
-                    $cart->delete();
+                if ($cart instanceof Sender_Cart && $cart->deleteIfOpen()) {
                     $this->sender->senderApi->senderApiShutdownCallback("senderDeleteCart", $cart->id);
                 }
                 $this->senderClearActiveCartSessionMap();
-                return null;
+                return ['status' => 'empty'];
             }
 
             // Update existing cart
@@ -566,35 +675,15 @@ class Sender_Carts
                 $changed = $cart->isDirty();
                 $cart->update();
 
-                if (!$changed){
+                $pending = (int) $wc->session->get(self::SENDER_PENDING_CART_TRACK_SESSION_KEY) === (int) $cart->id;
+                if (!$changed && (!$pending || $checkout)) {
                     return [
                             'status' => 'skipped',
                             'reason' => 'cart_unchanged'
                     ];
                 }
 
-                $payload = $this->senderPrepareCartData($cart);
-                if (!$payload) { return ['payload' => null]; }
-
-                if (wp_doing_ajax()) {
-                    if (get_option('woocommerce_cart_redirect_after_add') === 'yes') {
-                        $this->sender->senderApi->senderApiShutdownCallback("senderUpdateCart", $payload);
-                        return [
-                                'status' => 'sent',
-                                'method' => 'update',
-                                'payload' => $payload,
-                        ];
-                    }
-                    $this->handleCartFragmentsFilters(json_encode($payload), self::UPDATE_CART);
-                    return $payload;
-                } else {
-                    $this->sender->senderApi->senderApiShutdownCallback("senderUpdateCart", $payload);
-                    return [
-                            'status' => 'queued',
-                            'method' => 'update',
-                            'payload' => $payload,
-                    ];
-                }
+                return ['cart' => $cart, 'created' => false, 'pending' => $pending];
             }
 
             // Create new cart
@@ -615,46 +704,59 @@ class Sender_Carts
 
             if ($wc && $wc->session) {
                 $wc->session->set(self::SENDER_ACTIVE_CART_SESSION_KEY, (int)$newCart->id);
-            }
-
-            $payload = $this->senderPrepareCartData($newCart);
-            if (!$payload) { return ['payload' => null]; }
-
-            if ($this->senderUserId) {
-                $response = $this->sender->senderApi->senderTrackCart($payload);
-                return [
-                        'status' => 'sent',
-                        'payload' => $payload,
-                        'response' => $response
-                ];
-            }
-
-            if (wp_doing_ajax()) {
-                if (get_option('woocommerce_cart_redirect_after_add') === 'yes') {
-                    $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $payload);
-                    return [
-                            'status' => 'queued',
-                            'method' => 'create',
-                            'payload' => $payload,
-                    ];
+                // Only server-created session state authorizes subsequent guest writes.
+                $wc->session->set(self::SENDER_OWNED_CART_SESSION_KEY, $newCart->getRecoveryToken());
+                if ($this->senderUserId) {
+                    $wc->session->set(self::SENDER_PENDING_CART_TRACK_SESSION_KEY, (int) $newCart->id);
                 }
-                $response = $this->sender->senderApi->senderTrackCart($payload);
-                return [
-                        'status' => 'sent',
-                        'payload' => $payload,
-                        'response' => $response
-                ];
-            } else {
-                $this->sender->senderApi->senderApiShutdownCallback("senderTrackCart", $payload);
-                return [
-                        'status' => 'queued',
-                        'method' => 'create',
-                        'payload' => $payload,
-                ];
+                $wc->session->set_customer_session_cookie(true);
             }
+
+            return ['cart' => $newCart, 'created' => true, 'pending' => (bool) $this->senderUserId];
         } finally {
             $this->inSenderCartUpdated = false;
         }
+    }
+
+    /** Send the saved cart after the session lock is released; preserve skipped results. */
+    private function sendShoppingCart($update)
+    {
+        if (!isset($update['cart'])) return $update;
+        $cart = $update['cart'];
+        $created = $update['created'];
+        $pending = $update['pending'];
+        $payload = $this->senderPrepareCartData($cart);
+        if (!$payload) return ['payload' => null];
+        if ($pending) return $this->senderTrackSessionCart($cart, $payload);
+
+        $ajax = wp_doing_ajax();
+        if ($ajax && get_option('woocommerce_cart_redirect_after_add') !== 'yes') {
+            if ($created) {
+                return ['status' => 'sent', 'payload' => $payload, 'response' => $this->sender->senderApi->senderTrackCart($payload)];
+            }
+            $this->handleCartFragmentsFilters(json_encode($payload), self::UPDATE_CART);
+            return $payload;
+        }
+        $this->sender->senderApi->senderApiShutdownCallback($created ? 'senderTrackCart' : 'senderUpdateCart', $payload);
+        return ['status' => $ajax && !$created ? 'sent' : 'queued', 'method' => $created ? 'create' : 'update', 'payload' => $payload];
+    }
+
+    private function senderTrackSessionCart($cart, array $payload): array
+    {
+        $response = $this->sender->senderApi->senderTrackCart($payload);
+        $result = ['status' => 'sent', 'payload' => $payload, 'response' => $response];
+        if ($this->senderCartTrackingAccepted($response)) {
+            $this->withGuestCartSession(function () use ($cart, $result) {
+                $wc = $this->senderGetWoo();
+                if (!$wc || !$wc->session || (int) $wc->session->get(self::SENDER_PENDING_CART_TRACK_SESSION_KEY) !== (int) $cart->id) return;
+                $wc->session->__unset(self::SENDER_PENDING_CART_TRACK_SESSION_KEY);
+                $owned = $this->senderFindOwnedSessionCart();
+                if (!$owned || (int) $owned->id !== (int) $cart->id) return;
+                $user = (new Sender_User())->find($cart->user_id);
+                if ($user) $this->senderCleanupPreviousCart(null, $user, $result);
+            });
+        }
+        return $result;
     }
 
     public function handleCartFragmentsFilters($cartData, $type)
@@ -784,6 +886,12 @@ class Sender_Carts
         }
     }
 
+    /** On-hold checkouts retain the purchase-conversion behavior of earlier releases. */
+    private function canConvertOrder($order): bool
+    {
+        return $order->is_paid() || $order->has_status('on-hold');
+    }
+
     public function senderConvertCartFallback($order_id): bool
     {
         $order_id = absint($order_id);
@@ -813,6 +921,12 @@ class Sender_Carts
             return true;
         }
 
+        if (!$this->canConvertOrder($order)) return false;
+        if ($order->get_meta(Sender_Helper::SENDER_CART_TRACK_PENDING, true)
+            && (!$cart || !$this->trackPendingOrderCart($cart, $order))) {
+            return false;
+        }
+
         if (!$this->sender->senderApi->senderConvertCart($cartId, $cartData)) {
             return false;
         }
@@ -837,6 +951,10 @@ class Sender_Carts
         if (!$order_id || isset($this->renderedConvertCartScripts[$order_id])) {
             return '';
         }
+        $order = wc_get_order($order_id);
+        if (!$this->senderCanAccessOrder($order)) {
+            return '';
+        }
 
         $cartData = $this->orderCartData($order_id);
 
@@ -848,13 +966,26 @@ class Sender_Carts
             }
         }
 
+        $order = wc_get_order($order_id);
+        if ($order && $order->get_meta(Sender_Helper::SENDER_CART_TRACK_PENDING, true)) {
+            $cart = (new Sender_Cart())->find($order->get_meta(Sender_Helper::SENDER_CART_META, true));
+            if (!$this->canConvertOrder($order) || !$cart || !$this->trackPendingOrderCart($cart, $order)) {
+                return '';
+            }
+        }
+
         $this->renderedConvertCartScripts[$order_id] = true;
 
         ob_start(); ?>
         <script>
-            sender('convertCart', <?php echo wp_json_encode($cartData); ?>);
+            <?php if ($order && $this->canConvertOrder($order)) : ?>
+                sender('convertCart', <?php echo wp_json_encode($cartData); ?>);
+            <?php endif; ?>
 
-            fetch("<?php echo esc_url(admin_url('admin-ajax.php')); ?>?action=thankyou_seen&order_id=<?php echo intval($order_id); ?>")
+            fetch(<?php echo wp_json_encode(add_query_arg([
+                'action' => 'thankyou_seen', 'order_id' => $order_id, 'key' => $order->get_order_key(),
+                'sender_confirmation' => Sender_Order_Confirmation::confirmationNonce($order),
+            ], admin_url('admin-ajax.php'))); ?>)
                 .catch(() => {});
         </script>
         <?php
@@ -863,8 +994,19 @@ class Sender_Carts
 
     public function outputConvertCartScript($order_id)
     {
+        if (!$this->senderCanAccessOrder(wc_get_order($order_id))) {
+            return;
+        }
         $this->scheduleThankYouFallbackCheck($order_id);
         echo $this->addConvertCartScript($order_id);
+    }
+
+    public function senderConvertThankYouCart($order_id)
+    {
+        if ($this->senderCanAccessOrder(wc_get_order($order_id))) {
+            return $this->senderConvertCart($order_id);
+        }
+        return false;
     }
 
     private function scheduleThankYouFallbackCheck($order_id)
@@ -879,26 +1021,6 @@ class Sender_Carts
         }
     }
 
-    public function addTrackCartScript($cartData)
-    {
-        ob_start();
-        ?>
-        <script>
-            sender('trackCart', <?php echo json_encode($cartData); ?>);
-        </script>
-        <?php
-    }
-
-    public function addStatusCartUpdateScript($cartData)
-    {
-        ob_start();
-        echo "
-			<script>
-			sender('statusCartUpdate', " . json_encode($cartData) . ")
-            </script>
-		";
-    }
-
     public function triggerEmailCheckout()
     {
         if (!isset($_POST['email']) || !is_string($_POST['email']) || empty($_POST['email'])) {
@@ -908,6 +1030,10 @@ class Sender_Carts
         $sanitizedEmail = strtolower(sanitize_email(wp_unslash($_POST['email'])));
         if (!is_email($sanitizedEmail)) {
             return wp_send_json_error('A valid email is required');
+        }
+
+        if (is_user_logged_in() && $sanitizedEmail !== strtolower(wp_get_current_user()->user_email)) {
+            return wp_send_json_error('Email must match the logged-in customer', 403);
         }
 
         $names = [];
@@ -920,17 +1046,24 @@ class Sender_Carts
             }
         }
         $senderUser = (new Sender_User())->findBy('email', $sanitizedEmail);
-        if ($senderUser && !empty($senderUser->wp_user_id) && get_user_by('id', $senderUser->wp_user_id)) {
-            if ($names) {
-                $response = $this->sender->senderApi->senderTrackNotRegisteredUsers(
-                    array_merge([
-                        'email' => $sanitizedEmail,
-                        'customer_id' => $senderUser->wp_user_id,
-                    ], $names)
-                );
+        if (is_user_logged_in() && $senderUser
+                && (!$senderUser->wp_user_id || (int) $senderUser->wp_user_id === get_current_user_id())) {
+            if ($names || isset($_POST['newsletter'])) {
+                $payload = $names;
+                $newsletter = Sender_Helper::submittedNewsletterConsent('newsletter', 'newsletter_changed');
+                if ($newsletter !== null) {
+                    $payload['newsletter'] = $newsletter;
+                    $this->senderWpNewsletterHandle(get_current_user_id(), $newsletter);
+                }
+                $response = $this->sender->senderApi->senderTrackRegisteredUsers(get_current_user_id(), $payload);
                 if (!$response || empty($response->subscriber_id)) {
                     return wp_send_json_error('Subscriber not updated');
                 }
+            }
+            // Link the contact, but this email match does not authorize any earlier cart.
+            if (!$senderUser->wp_user_id) {
+                $senderUser->wp_user_id = get_current_user_id();
+                $senderUser->save();
             }
             $this->senderUserId = $senderUser->id;
 
@@ -955,8 +1088,25 @@ class Sender_Carts
             return wp_send_json_error('Subscriber not created');
         }
 
-        $subscriberId = $response->subscriber_id;
+        $cartUpdateResponse = $this->withGuestCartSession(function () use ($sanitizedEmail, $response) {
+            return $this->captureSubscriberCart($sanitizedEmail, $response->subscriber_id);
+        });
+        if ($cartUpdateResponse === false) {
+            return wp_send_json_error('Cart capture could not finish. Please retry.', 503);
+        }
+        $cartUpdateResponse = $this->sendShoppingCart($cartUpdateResponse);
+        return wp_send_json_success([
+                'cart_response'       => $cartUpdateResponse,
+                'subscriber_response' => [
+                        'payload' => $trackNotRegisteredUserPayload ?? null,
+                        'response' => $response
+                ],
+        ]);
+    }
 
+    private function captureSubscriberCart($sanitizedEmail, $subscriberId)
+    {
+        if ($this->guestSession->cartUpdateIsLate() || $this->cartUpdatesPaused()) return ['status' => 'skipped', 'reason' => 'order_prepared'];
         $senderUser = (new Sender_User())->findBy('sender_subscriber_id', $subscriberId);
 
         if (!$senderUser) {
@@ -969,29 +1119,8 @@ class Sender_Carts
             $senderUser->sender_subscriber_id = $subscriberId;
 
             if (!$senderUser->save()) {
-                return wp_send_json_error('Error saving user');
+                return false;
             }
-
-            //Old subscriber remove cart from previous one
-            $cart = null;
-            if (isset($_COOKIE[self::SENDER_SUBSCRIBER_ID])) {
-                $currentUserSender = (new Sender_User())->findBy('sender_subscriber_id', $_COOKIE[self::SENDER_SUBSCRIBER_ID]);
-                if ($currentUserSender) {
-                    $cart = (new Sender_Cart())->findByAttributes(
-                            [
-                                    'user_id' => $currentUserSender->id,
-                                    'cart_status' => 0
-                            ],
-                            'created DESC'
-                    );
-                }
-
-                if ($cart) {
-                    $cart->delete();
-                    $this->sender->senderApi->senderApiShutdownCallback("senderDeleteCart", $cart->id);
-                }
-            }
-
         } else {
             $updated = false;
 
@@ -1010,16 +1139,20 @@ class Sender_Carts
             }
         }
 
+        // Capture ownership before adopting the submitted email's identity.
+        // A subscriber cookie alone must never select a previous cart for deletion.
+        $previousCart = !is_user_logged_in() ? $this->senderFindOwnedSessionCart() : null;
+        $wc = $this->senderGetWoo();
+        $session = $wc ? $wc->session : null;
+        if ($session && $previousCart && (int) $previousCart->user_id !== (int) $senderUser->id) {
+            $tokens = (array) $session->get(self::SENDER_PREVIOUS_CARTS_SESSION_KEY, []);
+            $tokens[] = $previousCart->getRecoveryToken();
+            $session->set(self::SENDER_PREVIOUS_CARTS_SESSION_KEY, array_values(array_unique($tokens)));
+        }
         $this->senderUserId = $senderUser->id;
-        $cartUpdateResponse = $this->senderCartUpdated();
-
-        return wp_send_json_success([
-                'cart_response'       => $cartUpdateResponse,
-                'subscriber_response' => [
-                        'payload' => $trackNotRegisteredUserPayload ?? null,
-                        'response' => $response
-                ],
-        ]);
+        $work = $this->updateSessionCart();
+        if (is_array($work)) $this->senderCleanupPreviousCart($previousCart, $senderUser, $work);
+        return $work;
     }
 
     //Use to convert carts which got confirmed payment
@@ -1036,35 +1169,31 @@ class Sender_Carts
             return;
         }
 
+        if (!is_admin()) {
+            // A gateway or REST request can also confirm a bank transfer.
+            if ($oldStatus === 'on-hold' && in_array($newOrderStatus, [Sender_Helper::ORDER_PAID, Sender_Helper::ORDER_COMPLETED], true)) {
+                $order = wc_get_order($orderId);
+                if ($order && $order->is_paid() && $order->get_meta('_sender_checkout_store', true)
+                    && $order->get_meta('_sender_checkout_store', true) === (string) get_option('sender_store_register')
+                    && !$this->senderHandlePaidOrder($orderId)) {
+                    $this->scheduleThankYouFallbackCheck($orderId);
+                }
+            }
+            return;
+        }
+
         switch ($newOrderStatus) {
+            case Sender_Helper::ORDER_PAID:
+                // Manual bank-transfer approval does not fire payment_complete.
+                $order = wc_get_order($orderId);
+                if ($order && $order->is_paid()) {
+                    $this->senderHandlePaidOrder($orderId);
+                }
+                return;
             case Sender_Helper::ORDER_COMPLETED:
                 $this->senderHandlePaidOrder($orderId);
 
-                $order = wc_get_order($orderId);
-                $senderRemoteCartId = $order ? $order->get_meta(Sender_Helper::SENDER_CART_META, true) : null;
-                if (empty($senderRemoteCartId)) {
-                    return;
-                }
-
-                $cart = (new Sender_Cart())->findByAttributes(
-                        [
-                                'id' => $senderRemoteCartId,
-                        ]
-                );
-
-                if (!$cart) {
-                    return;
-                }
-
-                $cartStatus = [
-                        "external_id" => $cart->id,
-                        'order_id' => (string)$orderId,
-                        'cart_status' => $newOrderStatus,
-                        'resource_key' => $this->senderGetResourceKey(),
-                ];
-
-                $this->sender->senderApi->senderUpdateCartStatus($cart->id, $cartStatus);
-                return;
+                // Fall through to report the final status after conversion.
             case Sender_Helper::ORDER_PENDING_PAYMENT:
                 $order = wc_get_order($orderId);
                 $senderRemoteCartId = $order ? $order->get_meta(Sender_Helper::SENDER_CART_META, true) : null;
@@ -1115,6 +1244,10 @@ class Sender_Carts
             return true;
         }
 
+        if (!$this->trackPendingOrderCart($cart, $order)) {
+            return false;
+        }
+
         $cartData = $this->buildConvertCartPayload($cart, $order);
         if (!$this->sender->senderApi->senderConvertCart($cart->id, $cartData)) {
             return false;
@@ -1122,6 +1255,7 @@ class Sender_Carts
 
         $cart->cart_status = Sender_Helper::CONVERTED_CART;
         $cart->save();
+
 
         do_action('sender_update_customer_data', $cartData['email'], true);
 
@@ -1160,6 +1294,13 @@ class Sender_Carts
             }
         }
 
+        $sessionCart = $this->senderFindOrderSessionCart($order);
+        if ($sessionCart) {
+            $order->update_meta_data(Sender_Helper::SENDER_CART_META, $sessionCart->id);
+            $order->save_meta_data();
+            return $sessionCart;
+        }
+
         $billingEmail = strtolower((string) $order->get_billing_email());
         if ($billingEmail === '') {
             return false;
@@ -1181,13 +1322,46 @@ class Sender_Carts
         $cart->cart_status = Sender_Helper::UNPAID_CART;
         $cart->save();
 
-        $trackPayload = $this->buildTrackCartPayload($cart, $order, $senderUser);
-        $this->sender->senderApi->senderTrackCart($trackPayload);
-
+        // Checkout preparation stays local until the order is ready for conversion.
         $order->update_meta_data(Sender_Helper::SENDER_CART_META, $cart->id);
+        $order->update_meta_data(Sender_Helper::SENDER_CART_TRACK_PENDING, $cart->id);
         $order->save();
 
         return $cart;
+    }
+
+    private function trackPendingOrderCart($cart, $order): bool
+    {
+        if ((int) $order->get_meta(Sender_Helper::SENDER_CART_TRACK_PENDING, true) !== (int) $cart->id) {
+            return true;
+        }
+
+        $senderUser = (new Sender_User())->find($cart->user_id);
+        if (!$senderUser) {
+            return false;
+        }
+        // Registration must resolve the same destination used by the cooldown and payload.
+        $storeId = $this->senderGetOrRegisterStoreId();
+        $retryKey = 'sender_cart_track_retry_' . $order->get_id() . '_' . $cart->id
+            . '_' . hash('sha256', (string) $storeId);
+        if (get_transient($retryKey)) {
+            $this->scheduleThankYouFallbackCheck($order->get_id());
+            return false;
+        }
+
+        // Share the cooldown across payment callbacks, page loads and cron.
+        // Keep the pending marker until Sender acknowledges this exact cart.
+        set_transient($retryKey, true, 5 * MINUTE_IN_SECONDS);
+        $response = $this->sender->senderApi->senderTrackCart($this->buildTrackCartPayload($cart, $order, $senderUser, $storeId));
+        if (!$this->senderCartTrackingAccepted($response)) {
+            $this->scheduleThankYouFallbackCheck($order->get_id());
+            return false;
+        }
+
+        delete_transient($retryKey);
+        $order->delete_meta_data(Sender_Helper::SENDER_CART_TRACK_PENDING);
+        $order->save_meta_data();
+        return true;
     }
 
     private function serializeOrderItems($order): array
@@ -1225,18 +1399,12 @@ class Sender_Carts
         return $serializedItems;
     }
 
-    private function buildTrackCartPayload($cart, $order, $senderUser): array
+    private function buildTrackCartPayload($cart, $order, $senderUser, $storeId): array
     {
-        $storeId = get_option('sender_store_register') ?: '';
-        if (empty($storeId)) {
-            $this->fixEmptyStoreRegistered();
-            $storeId = get_option('sender_store_register') ?: '';
-        }
-
         $cartUrl = $cart->getRecoveryUrl();
 
         return [
-                'external_id' => $cart->id,
+                'external_id' => (int) $cart->id,
                 'url' => $cartUrl,
                 'currency' => get_woocommerce_currency(),
                 'order_total' => (string) $order->get_total(),
@@ -1289,11 +1457,7 @@ class Sender_Carts
                 'order_date' => $orderDate,
         ];
 
-        $storeId = get_option('sender_store_register') ?: '';
-        if (empty($storeId)) {
-            $this->fixEmptyStoreRegistered();
-            $storeId = get_option('sender_store_register') ?: '';
-        }
+        $storeId = $this->senderGetOrRegisterStoreId();
 
         $cartData = [
                 'external_id' => $cart->id,
@@ -1349,16 +1513,7 @@ class Sender_Carts
                 $oldPrice = $regularPrice;
             }
 
-            if ($product->is_type('variation')) {
-                $sku = $product->get_sku();
-                if (!$sku) {
-                    $parentId = $product->get_parent_id();
-                    $parent = wc_get_product($parentId);
-                    $sku = $parent ? $parent->get_sku() : '';
-                }
-            } else {
-                $sku = $product->get_sku();
-            }
+            $sku = $this->senderGetProductSku($product);
 
             $payload = [
                     'sku' => (string) $sku,
@@ -1378,32 +1533,6 @@ class Sender_Carts
         }
 
         return $products;
-    }
-
-    public function updateUserEmailMarketingConsent($email, $userId)
-    {
-        $subscriber = $this->sender->senderApi->getSubscriber($email);
-        if ($subscriber) {
-            if (isset($subscriber->data->status->email)) {
-                $emailStatusFromSender = strtoupper($subscriber->data->status->email);
-                switch ($emailStatusFromSender) {
-                    case Sender_Helper::UPDATE_STATUS_ACTIVE:
-                        $status = Sender_Helper::SUBSCRIBED;
-                        break;
-                    case Sender_Helper::UPDATE_STATUS_UNSUBSCRIBED:
-                        $status = Sender_Helper::UNSUBSCRIBED;
-                        break;
-                }
-
-                if (isset($status)) {
-                    update_user_meta(
-                            $userId,
-                            Sender_Helper::EMAIL_MARKETING_META_KEY,
-                            Sender_Helper::generateEmailMarketingConsent($status)
-                    );
-                }
-            }
-        }
     }
 
     public function senderRecoverCart($template)
@@ -1455,9 +1584,16 @@ class Sender_Carts
 
         $wooCart->calculate_totals();
         (new WC_Cart_Session($wooCart))->set_session();
-        $wc->session->set(self::SENDER_ACTIVE_CART_SESSION_KEY, (int) $cart->id);
-        $wc->session->set(self::SENDER_RECOVERED_CART_SESSION_KEY, $token);
+        // Persist the restored Woo session before sharing its verified cart binding.
         $wc->session->set_customer_session_cookie(true);
+        $wc->session->save_data();
+        $bound = $this->withGuestCartSession(function () use ($wc, $cart, $token) {
+            $wc->session->set(self::SENDER_ACTIVE_CART_SESSION_KEY, (int) $cart->id);
+            $wc->session->set(self::SENDER_RECOVERED_CART_SESSION_KEY, $token);
+            $wc->session->set(self::SENDER_OWNED_CART_SESSION_KEY, $token);
+            return true;
+        });
+        if (!$bound) return $template;
         $wc->session->save_data();
 
         $cart->cart_recovered = '1';
@@ -1529,11 +1665,7 @@ class Sender_Carts
     //Block checkout subscribe to newsletter
     public function senderSubscribeNewsletterBlockEnqueueAssets()
     {
-        $storeId = get_option('sender_store_register') ?: '';
-        if (empty($storeId)){
-            $this->fixEmptyStoreRegistered();
-            $storeId = get_option('sender_store_register')?: '';
-        }
+        $storeId = $this->senderGetOrRegisterStoreId();
 
         wp_enqueue_script(
                 'subscribe-newsletter-block',
@@ -1596,36 +1728,130 @@ class Sender_Carts
         return null;
     }
 
-    /** Only an identified owner or a verified recovery in this Woo session may use a mapped cart. */
+    /** Retire an owned guest cart after acknowledged replacement or confirmed emptying. */
+    private function senderCleanupPreviousCart($previousCart, $senderUser, $cartUpdateResponse)
+    {
+        if (is_user_logged_in() || $this->cartUpdatesPaused()
+            || (function_exists('is_order_received_page') && is_order_received_page())) {
+            return;
+        }
+        $status = $cartUpdateResponse['status'] ?? null;
+        if ($status !== 'empty' && ($status !== 'sent'
+            || !$this->senderCartTrackingAccepted($cartUpdateResponse['response'] ?? null))) {
+            return;
+        }
+
+        $wc = $this->senderGetWoo();
+        $session = $wc ? $wc->session : null;
+        $tokens = $session ? (array) $session->get(self::SENDER_PREVIOUS_CARTS_SESSION_KEY, []) : [];
+        if ($previousCart) {
+            $tokens[] = $previousCart->getRecoveryToken();
+        }
+        foreach (array_unique($tokens) as $token) {
+            // Revalidate after the API call; a cart may have been paid or reassigned.
+            $cart = $this->senderFindRecoveryCart($token);
+            if ($cart && (int) $cart->user_id !== (int) $senderUser->id && $cart->deleteIfOpen()) {
+                $this->sender->senderApi->senderApiShutdownCallback('senderDeleteCart', $cart->id);
+            }
+        }
+        if ($session) {
+            $session->__unset(self::SENDER_PREVIOUS_CARTS_SESSION_KEY);
+        }
+    }
+
+    private function senderCartTrackingAccepted($response): bool
+    {
+        if (is_object($response)) {
+            return ($response->success ?? null) === true;
+        }
+        if (!is_string($response)) {
+            return false;
+        }
+        return $response === 'Cart successfully tracked'
+            || preg_match('/\ACart (?:successfully tracked|updated successfully) with id [1-9][0-9]*\z/', $response) === 1;
+    }
+
+    /** Only the active cart explicitly authorized in this Woo session; never a contact lookup. */
+    private function senderFindOwnedSessionCart()
+    {
+        $wc = $this->senderGetWoo();
+        if (!$wc || !$wc->session) {
+            return null;
+        }
+        $id = (int) $wc->session->get(self::SENDER_ACTIVE_CART_SESSION_KEY);
+        if (!$id) {
+            return null;
+        }
+        foreach ([self::SENDER_OWNED_CART_SESSION_KEY, self::SENDER_RECOVERED_CART_SESSION_KEY] as $key) {
+            $cart = $this->senderFindRecoveryCart($wc->session->get($key));
+            if ($cart && (int) $cart->id === $id) {
+                return $cart;
+            }
+        }
+        return $this->senderFindLegacySessionCart($wc->session, $id);
+    }
+
+    /** Preserve pre-token carts using their persisted Woo session, never a contact lookup. */
+    private function senderFindLegacySessionCart($session, int $id)
+    {
+        if (!$session instanceof WC_Session_Handler
+            || $session->get(self::SENDER_OWNED_CART_SESSION_KEY)
+            || $session->get(self::SENDER_RECOVERED_CART_SESSION_KEY)) {
+            return null;
+        }
+        $cookie = $session->get_session_cookie();
+        if (!$cookie || (string) $cookie[0] !== (string) $session->get_customer_id()
+            || (int) $cookie[1] <= time()) {
+            return null;
+        }
+        global $wpdb;
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT session_value, session_expiry FROM {$wpdb->prefix}woocommerce_sessions WHERE session_key = %s",
+            $session->get_customer_id()
+        ));
+        if (!$row || (int) $row->session_expiry <= time()) {
+            return null;
+        }
+        $stored = @unserialize($row->session_value, ['allowed_classes' => false]);
+        if (!is_array($stored) || !isset($stored[self::SENDER_ACTIVE_CART_SESSION_KEY])
+            || !ctype_digit((string) $stored[self::SENDER_ACTIVE_CART_SESSION_KEY])
+            || (int) $stored[self::SENDER_ACTIVE_CART_SESSION_KEY] !== $id
+            || !empty($stored[self::SENDER_OWNED_CART_SESSION_KEY])
+            || !empty($stored[self::SENDER_RECOVERED_CART_SESSION_KEY])) {
+            return null;
+        }
+        $cart = (new Sender_Cart())->find($id);
+        if ($cart && (int) $cart->cart_status === 0 && (new Sender_User())->find($cart->user_id)) {
+            // Retain the existing Woo session contract without turning an old
+            // binding into a new long-lived Sender session credential.
+            return $cart;
+        }
+        return null;
+    }
+
+    /** Contact/account links identify a customer; cart access requires this session's proof. */
     private function senderFindActiveCart($senderUser)
     {
         $wc = $this->senderGetWoo();
         if ($wc && $wc->session) {
             $id = (int) $wc->session->get(self::SENDER_ACTIVE_CART_SESSION_KEY);
             if ($id) {
-                $cart = (new Sender_Cart())->find($id);
+                $cart = $this->senderFindOwnedSessionCart();
                 if ($cart && (int) $cart->cart_status === 0) {
-                    if ($senderUser && (int) $cart->user_id === (int) $senderUser->id) {
-                        return $cart;
-                    }
-                    if (!is_user_logged_in() && !$this->senderUserId) {
-                        $recovered = $this->senderFindRecoveryCart($wc->session->get(self::SENDER_RECOVERED_CART_SESSION_KEY));
-                        if ($recovered && (int) $recovered->id === $id) {
+                    if (is_user_logged_in()) {
+                        if ($senderUser && (int) $cart->user_id === (int) $senderUser->id) {
                             return $cart;
                         }
+                    } elseif (!$this->senderUserId || (int) $cart->user_id === (int) $this->senderUserId) {
+                        return $cart;
                     }
                 }
-                // Old numeric recovery sessions do not establish ownership.
+                // Reject mappings without signed proof or a matching persisted Woo session.
                 $this->senderClearActiveCartSessionMap();
             }
         }
 
-        if (!$senderUser) return null;
-
-        return (new Sender_Cart())->findByAttributes(
-                ['user_id' => $senderUser->id, 'cart_status' => 0],
-                'created DESC'
-        );
+        return null;
     }
 
     /** Clear the active Sender cart id from Woo session */
@@ -1635,12 +1861,18 @@ class Sender_Carts
         if ($wc && $wc->session) {
             $wc->session->set(self::SENDER_ACTIVE_CART_SESSION_KEY, null);
             $wc->session->__unset(self::SENDER_RECOVERED_CART_SESSION_KEY);
+            $wc->session->__unset(self::SENDER_OWNED_CART_SESSION_KEY);
+            $wc->session->__unset(self::SENDER_PENDING_CART_TRACK_SESSION_KEY);
         }
     }
 
     public function senderMarkThankYouSeen()
     {
         $order_id = intval($_GET['order_id'] ?? 0);
+        if (!Sender_Order_Confirmation::canConfirm(wc_get_order($order_id))) {
+            wp_send_json_error('Order access denied', 403);
+            return;
+        }
         $converted = false;
 
         if ($order_id) {
@@ -1656,6 +1888,11 @@ class Sender_Carts
                 'order_id' => $order_id,
                 'converted' => $converted,
         ]);
+    }
+
+    private function senderCanAccessOrder($order): bool
+    {
+        return Sender_Order_Confirmation::canView($order);
     }
 
     public function runFallbackIfNotSeen($order_id)
@@ -1677,6 +1914,9 @@ class Sender_Carts
         global $wp;
         $order_id = absint($wp->query_vars['order-received'] ?? 0);
         if (!$order_id) {
+            return $template;
+        }
+        if (!$this->senderCanAccessOrder(wc_get_order($order_id))) {
             return $template;
         }
 
