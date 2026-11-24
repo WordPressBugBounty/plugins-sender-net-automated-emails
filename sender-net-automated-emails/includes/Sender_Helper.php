@@ -92,17 +92,17 @@ class Sender_Helper
         );
         $previous = $wpdb->get_var($query);
         $state = maybe_unserialize($previous);
-        if (!is_array($state) || ($state['status'] ?? '') !== 'cancelling'
-            || !self::hasExpiredCancellation($state)) {
-            return $previous;
+        if (!is_array($state)) return $previous;
+        $stored = $state;
+        if (($state['status'] ?? '') === 'cancelling' && self::hasExpiredCancellation($state)) {
+            // A terminated worker cannot acknowledge cancellation after its grace period.
+            $state['status'] = 'cancelled';
+            $state['updated_at'] = current_time('mysql');
+            $state['recovered_at_utc'] = gmdate('Y-m-d H:i:s');
         }
-
-        // A terminated worker cannot acknowledge cancellation. Release that job
-        // after the grace period; every resumed worker still checks its ownership
-        // before sending another batch or saving progress/completion.
-        $state['status'] = 'cancelled';
-        $state['updated_at'] = current_time('mysql');
-        $state['recovered_at_utc'] = gmdate('Y-m-d H:i:s');
+        // Also clear data left by a worker that finished before this update.
+        $state = self::discardFinishedBatch($state);
+        if ($state === $stored) return $previous;
         if (self::replaceSyncState($previous, $state)) {
             return maybe_serialize($state);
         }
@@ -115,6 +115,17 @@ class Sender_Helper
     {
         $requestedAt = self::getSyncCancellationRequestedAt($state);
         return $requestedAt !== null && $requestedAt > 0 && time() - $requestedAt >= self::SYNC_CANCELLATION_TIMEOUT;
+    }
+
+    private static function discardFinishedBatch(array $state): array
+    {
+        if (($state['format'] ?? null) === 2 && in_array($state['status'] ?? '', ['completed', 'failed', 'cancelled'], true)) {
+            $state['pending_batch'] = null;
+            if (is_string($state['cursor'] ?? null)) $state['cursor'] = null;
+            $state['attempt_id'] = null;
+            $state['lease_until'] = 0;
+        }
+        return $state;
     }
 
     /** Resolve the cancellation time without recovering or writing sync state. */
@@ -169,10 +180,8 @@ class Sender_Helper
     private static function replaceSyncState($previous, array $state): bool
     {
         global $wpdb;
-        $changed = $wpdb->query($wpdb->prepare(
-            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND BINARY option_value = %s",
-            maybe_serialize($state), self::SYNC_STATE_OPTION, $previous
-        ));
+        // Compare the exact stored bytes without sending a second copy of a pending batch.
+        $changed = $wpdb->query(self::syncStateUpdateSql($state, hash('sha256', $previous)));
         if ($changed !== 1) {
             return false;
         }
@@ -180,7 +189,40 @@ class Sender_Helper
         return true;
     }
 
-    public static function claimSyncJob(&$reason = null)
+    private static function syncStateUpdateSql(array $state, string $previousHash): string
+    {
+        global $wpdb;
+        return $wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND SHA2(BINARY option_value, 256) = %s",
+            maybe_serialize($state), self::SYNC_STATE_OPTION, $previousHash
+        );
+    }
+
+    /** Measure the escaped database write before rejecting a single large record. */
+    public static function syncStateWriteBytes(array $state): int
+    {
+        global $wpdb;
+        $sql = self::syncStateUpdateSql($state, hash('sha256', ''));
+        if (method_exists($wpdb, 'remove_placeholder_escape')) $sql = $wpdb->remove_placeholder_escape($sql);
+        return strlen($sql);
+    }
+
+    /** Atomically change one job without trusting the WordPress option cache. */
+    public static function changeSyncJob(string $jobId, callable $change)
+    {
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $previous = self::getSyncStateValue();
+            $state = maybe_unserialize($previous);
+            if (!is_array($state) || ($state['job_id'] ?? null) !== $jobId) return false;
+            $next = $change($state);
+            if (!is_array($next)) return false;
+            $next = self::discardFinishedBatch($next);
+            if (maybe_serialize($next) === $previous || self::replaceSyncState($previous, $next)) return $next;
+        }
+        throw new RuntimeException('Unable to persist shop sync progress.');
+    }
+
+    public static function claimSyncJob(&$reason = null, array $initialState = [])
     {
         $previous = self::getSyncStateValue();
         $state = maybe_unserialize($previous);
@@ -193,6 +235,7 @@ class Sender_Helper
             return false;
         }
 
+        $state += $initialState;
         $state['job_id'] = $state['job_id'] ?? wp_generate_uuid4();
         $state['status'] = 'running';
         $state['stage'] = 'starting';
@@ -223,10 +266,15 @@ class Sender_Helper
                 // cannot be removed by a late cancellation request.
                 wp_clear_scheduled_hook('sender_export_shop_data_cron');
             }
-            $state['status'] = $state['status'] === 'queued' ? 'cancelled' : 'cancelling';
+            $betweenBatches = ($state['format'] ?? null) === 2 && empty($state['attempt_id']);
+            $state['status'] = $state['status'] === 'queued' || $betweenBatches ? 'cancelled' : 'cancelling';
             $state['cancel_requested_at'] = time();
             $state['updated_at'] = current_time('mysql');
+            $state = self::discardFinishedBatch($state);
             if (self::replaceSyncState($previous, $state)) {
+                if ($state['status'] === 'cancelled' && class_exists('Sender_Shop_Export')) {
+                    Sender_Shop_Export::clearScheduled($state);
+                }
                 return true;
             }
         }

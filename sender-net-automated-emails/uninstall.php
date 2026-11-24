@@ -43,6 +43,15 @@ if (!(new Sender_Repository())->rememberNextCartId()) {
     wp_die(__('Could not preserve Sender cart IDs. Please retry deleting the plugin.', 'sender-net-automated-emails'));
 }
 wp_clear_scheduled_hook('sender_sync_cart_recovery_urls');
+wp_clear_scheduled_hook('sender_export_shop_data_cron');
+foreach (_get_cron_array() ?: [] as $timestamp => $hooks) {
+    foreach (['sender_export_shop_data_batch', 'sender_export_shop_data_batch_cron', 'sender_recover_shop_export'] as $hook) {
+        foreach ($hooks[$hook] ?? [] as $event) wp_unschedule_event($timestamp, $hook, $event['args']);
+    }
+}
+if (function_exists('as_unschedule_all_actions') && did_action('action_scheduler_init')) {
+    as_unschedule_all_actions('', [], 'sender-shop-export');
+}
 
 $senderApi = new Sender_API();
 $senderApi->senderDeleteStore();

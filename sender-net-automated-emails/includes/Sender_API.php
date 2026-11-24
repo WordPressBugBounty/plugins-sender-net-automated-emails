@@ -10,6 +10,7 @@ class Sender_API
 {
     private const CONFIG_REQUEST_TIMEOUT = 20;
     private const EXPORT_REQUEST_TIMEOUT = 30;
+    public const SHOP_EXPORT_REQUEST_TIMEOUT = self::EXPORT_REQUEST_TIMEOUT;
 
     private $senderBaseUrl = 'https://api.sender.net/v2/';
     private $senderStatsBaseUrl = 'https://stats.sender.net/commerce/';
@@ -527,6 +528,33 @@ class Sender_API
         return $this->senderBuildResponse($response);
     }
 
+    /** Bounded shop-job transport. Keep diagnostics free of payloads and credentials. */
+    public function senderExportBatch(array $data): array
+    {
+        $response = $this->sender_remote_post(
+            $this->senderBaseUrl . 'stores/' . get_option('sender_store_register') . '/import_shop_data',
+            array_merge($this->senderBaseRequestArguments(), [
+                'body' => wp_json_encode($data), 'data_format' => 'body', 'timeout' => self::SHOP_EXPORT_REQUEST_TIMEOUT,
+            ])
+        );
+        if (is_wp_error($response)) {
+            return ['accepted' => false, 'http_status' => 0, 'reason' => 'transport_error', 'retry_after' => 60];
+        }
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $body = json_decode(wp_remote_retrieve_body($response));
+        $accepted = $status === 200 && is_object($body) && ($body->success ?? null) === true;
+        $header = wp_remote_retrieve_header($response, 'retry-after');
+        $delay = 60;
+        if (is_scalar($header) && is_numeric($header)) $delay = (int) $header;
+        elseif (is_string($header) && $header !== '') {
+            $timestamp = strtotime($header);
+            if ($timestamp !== false) $delay = $timestamp - time();
+        }
+        return ['accepted' => $accepted, 'http_status' => $status,
+            'reason' => $accepted ? 'accepted' : ($status === 429 ? 'rate_limited' : 'api_rejected'),
+            'retry_after' => max(5, min(3600, $delay))];
+    }
+
     public function senderTrackCart(array $cartParams)
     {
         $jsonBody = json_encode($cartParams);
@@ -585,6 +613,10 @@ class Sender_API
     public function senderUpdateCartStatus($cartId, $cartStatusData)
     {
         $url = $this->senderStatsBaseUrl . 'carts/' . $cartId . '/status';
+        $storeId = get_option('sender_store_register');
+        if ($storeId) {
+            $cartStatusData['store_id'] = (string) $storeId;
+        }
 
         $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($cartStatusData), 'method' => 'PATCH']);
         $response = $this->sender_remote_post($url, $params);

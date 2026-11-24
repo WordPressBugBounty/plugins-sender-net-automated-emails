@@ -59,9 +59,14 @@ class Sender_Webhooks
 
     public function sender_webhook_handler(WP_REST_Request $request)
     {
-        $data = $request->get_json_params();
+        $data = $this->webhookData($request);
         if (!isset($data['topic'])) {
-            return new WP_REST_Response(['error' => 'Field topic is required.'], 404);
+            // Authentication already ran. Report transport metadata, never the
+            // callback body, keys, customer details or arbitrary header values.
+            return new WP_REST_Response(['error' => 'Field topic is required.', 'transport' => [
+                'json_content_type' => $request->is_json_content_type(),
+                'body_bytes' => strlen((string) $request->get_body()),
+            ]], 404);
         }
 
         try {
@@ -92,6 +97,16 @@ class Sender_Webhooks
         } catch (Throwable $e) {
             return new WP_REST_Response(['error' => 'Exception occurred while handling topic: ' . $e->getMessage()], 500);
         }
+    }
+
+    private function webhookData(WP_REST_Request $request): array
+    {
+        $data = $request->get_json_params();
+        if (is_array($data)) return $data;
+        // Some hosts alter Content-Type metadata. Keep accepting only a JSON
+        // body, with the same permission checks; never read topics from the URL.
+        $data = json_decode((string) $request->get_body(), true);
+        return is_array($data) ? $data : [];
     }
 
     public function import_shop_data_callback()

@@ -5,13 +5,13 @@ if (!defined('ABSPATH')) {
 }
 
 require_once plugin_dir_path(__FILE__) . 'Sender_Helper.php';
+require_once plugin_dir_path(__FILE__) . 'Sender_Shop_Export.php';
 
 class Sender_WooCommerce
 {
     private $sender;
     private $logFilePath;
-    private $syncActive = false;
-    private $syncState = [];
+    private $shopExport;
     private $productImportScriptRendered = false;
 
     public function __construct($sender, $update = false)
@@ -21,6 +21,7 @@ class Sender_WooCommerce
         }
 
         $this->sender = $sender;
+        $this->shopExport = new Sender_Shop_Export($this, $sender->senderApi);
         add_action('woocommerce_single_product_summary', [$this, 'senderAddProductImportScript'], 10, 2);
         add_action('wp_footer', [$this, 'senderAddProductImportScriptFallback']);
 
@@ -98,6 +99,13 @@ class Sender_WooCommerce
 
     public function repairQueuedSyncEvent()
     {
+        $current = Sender_Helper::getSyncState();
+        if (($current['format'] ?? null) === 2) {
+            if (in_array($current['status'], ['queued', 'running', 'cancelling'], true)) {
+                $this->shopExport->repair();
+            }
+            return;
+        }
         // Cron removes a single event before calling its worker. Do not repair
         // that normal transition from within the cron process itself.
         if (defined('DOING_CRON') && DOING_CRON) {
@@ -116,159 +124,10 @@ class Sender_WooCommerce
         $this->scheduleSenderExportShopDataCronJob(0, true);
     }
 
-    private function updateSyncState($status, $stage = null)
-    {
-        $this->syncState['status'] = $status;
-        if ($stage !== null) {
-            $this->syncState['stage'] = $stage;
-        }
-        $this->syncState['updated_at'] = current_time('mysql');
-        $this->syncState = Sender_Helper::updateClaimedSyncJob($this->syncState);
-    }
-
     public function senderExportShopDataCronJob()
     {
-        // Adopt a cron event scheduled by an older plugin version without durable state.
-        add_option(Sender_Helper::SYNC_STATE_OPTION, ['status' => 'queued'], '', false);
-        // Keep diagnostics separate from the state used to claim the job.
-        $attempt = [
-            'entered_at_utc' => gmdate('Y-m-d H:i:s'),
-            'source' => defined('DOING_CRON') && DOING_CRON ? 'wp_cron' : 'other',
-            'claim_result' => 'pending',
-        ];
-        update_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, $attempt, false);
-        $claimed = Sender_Helper::claimSyncJob($reason);
-        $attempt['claim_result'] = $reason;
-        update_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, $attempt, false);
-        if (!$claimed) {
-            return false;
-        }
-        $this->syncState = $claimed;
-        $this->syncActive = true;
-        register_shutdown_function(function () {
-            // Covers PHP fatal errors/timeouts and unexpected exit during export.
-            if ($this->syncActive) {
-                $this->finishStoppedSync('failed');
-            }
-        });
-
-        try {
-            // Remove any duplicate pending event before processing the claimed job.
-            wp_clear_scheduled_hook('sender_export_shop_data_cron');
-            return $this->runShopDataExport();
-        } catch (\Throwable $e) {
-            $this->finishStoppedSync($e->getCode() === 499 ? 'cancelled' : 'failed', $e->getMessage());
-            return false;
-        } finally {
-            $this->syncActive = false;
-        }
-    }
-
-    private function finishStoppedSync($status, $message = '')
-    {
-        $this->syncActive = false;
-        try {
-            $this->updateSyncState($status);
-        } catch (\Throwable $e) {
-            // A stale worker must not overwrite a newer job or its log.
-            return;
-        }
-        $this->logExportDebugInfo($this->syncState['status'] === 'cancelled' ? 'Cancelled' : 'Export Failed',
-            $message ?: 'Worker stopped before completion.');
-        delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-    }
-
-    private function runShopDataExport()
-    {
-        $this->logExportDebugInfo('Start', "Sender export data started");
-
-        $startedAt = time();
-        $diagnostics = Sender_Helper::getSyncDiagnostics($this->syncState);
-        $startDelay = isset($this->syncState['not_before'])
-            ? max(0, $startedAt - $this->syncState['not_before']) . 's' : 'unknown';
-        $this->logExportDebugInfo('Sync Timing', sprintf(
-            'Eligible at (UTC): %s | Started at (UTC): %s | Delay after eligibility: %s',
-            $diagnostics['eligible_at_utc'] ?? 'unknown', gmdate('Y-m-d H:i:s', $startedAt), $startDelay
-        ));
-        $this->logExportDebugInfo('Cron', sprintf(
-            'Worker: %s | Automatic WP-Cron disabled: %s | Alternate WP-Cron: %s | Lock age: %s | Lock timeout: %ss',
-            defined('DOING_CRON') && DOING_CRON ? 'wp_cron' : 'other',
-            $diagnostics['wp_cron_disabled'] ? 'yes' : 'no',
-            $diagnostics['alternate_wp_cron'] ? 'yes' : 'no',
-            $diagnostics['cron_lock_age_seconds'] === null ? 'none' : $diagnostics['cron_lock_age_seconds'] . 's',
-            $diagnostics['cron_lock_timeout_seconds']
-        ));
-
-        $retryKey = 'sender_export_retry_count';
-        $retry = (int) get_transient($retryKey);
-
-        if (
-                !class_exists('WooCommerce') ||
-                !did_action('woocommerce_init') ||
-                !post_type_exists('shop_order')
-        ) {
-            if ($retry >= 3) {
-                $this->logExportDebugInfo(
-                        'Env',
-                        'WooCommerce not ready after 3 retries — aborting export'
-                );
-
-                delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-                delete_transient($retryKey);
-                $this->updateSyncState('failed');
-                return;
-            }
-
-            set_transient($retryKey, $retry + 1, 5 * MINUTE_IN_SECONDS);
-
-            $this->logExportDebugInfo(
-                    'Env',
-                    'WooCommerce not ready in cron — retry ' . ($retry + 1)
-            );
-
-            $this->syncState['not_before'] = time() + 30;
-            $this->updateSyncState('queued', 'starting');
-            $this->syncActive = false;
-            wp_schedule_single_event($this->syncState['not_before'], 'sender_export_shop_data_cron');
-            return;
-        }
-
-        delete_transient($retryKey);
-
-        global $wpdb;
-
-        $this->logExportDebugInfo('Env', 'wpdb->prefix: ' . $wpdb->prefix);
-        $this->logExportDebugInfo('Env', 'wpdb->posts: ' . $wpdb->posts);
-        $this->logExportDebugInfo('Env', 'wpdb->postmeta: ' . $wpdb->postmeta);
-
-        $sanityOrders = $wpdb->get_var(
-                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order'"
-        );
-        $sanityProducts = $wpdb->get_var(
-                "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='product'"
-        );
-
-        $this->logExportDebugInfo(
-                'Sanity',
-                "Orders in wpdb->posts: $sanityOrders | Products in wpdb->posts: $sanityProducts"
-        );
-
-        $this->updateSyncState('running', 'customers');
-        $this->exportCustomers();
-        $this->updateSyncState('running', 'orders');
-        $this->exportOrders();
-
-        $this->syncState['synced_at'] = current_time('Y-m-d H:i:s');
-        $this->updateSyncState('completed');
-        $this->syncActive = false;
-        $this->logExportDebugInfo('Completed', 'Sender export finished successfully');
-        update_option('sender_wocommerce_sync', true);
-        update_option('sender_synced_data_date', $this->syncState['synced_at']);
-
-        update_option(Sender_Helper::TRANSIENT_SYNC_FINISHED, true, false);
-        delete_transient(Sender_Helper::TRANSIENT_SYNC_IN_PROGRESS);
-
-        return true;
+        if (!get_option(Sender_Helper::SYNC_STATE_OPTION)) Sender_Helper::queueSyncJob(0);
+        return $this->shopExport->start();
     }
 
     public function senderRemoveSubscriber($postId)
@@ -820,24 +679,19 @@ class Sender_WooCommerce
 
     private function checkRateLimitation()
     {
-        while (true) {
-            if ($this->syncActive) {
-                $state = Sender_Helper::getSyncState();
-                if (($state['job_id'] ?? null) !== ($this->syncState['job_id'] ?? null) || $state['status'] !== 'running') {
-                    throw new \RuntimeException('Sync cancellation requested.', 499);
-                }
-            }
-            if (!get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) {
-                return true;
-            }
-            if ($this->syncActive) {
-                $this->updateSyncState('running');
-            }
-            sleep(5);
-        }
+        // Compatibility for direct synchronous callers. Resumable shop jobs
+        // defer their scheduled action and never wait in this loop.
+        while (get_transient(Sender_Helper::TRANSIENT_SENDER_X_RATE)) sleep(5);
+        return true;
     }
 
     public function sendWoocommerceCustomersToSender($customers, $list = null)
+    {
+        $this->checkRateLimitation();
+        $this->exportBatch(['customers' => $this->prepareWooCustomers($customers, $list)]);
+    }
+
+    public function prepareWooCustomers($customers, $list = null): array
     {
         $customersExportData = [];
         foreach ($customers as $customer) {
@@ -845,10 +699,12 @@ class Sender_WooCommerce
                 $customer['tags'] = [$list];
             }
 
-            if (isset($customer[Sender_Helper::EMAIL_MARKETING_META_KEY])) {
-                $customer[Sender_Helper::EMAIL_MARKETING_META_KEY] = unserialize($customer[Sender_Helper::EMAIL_MARKETING_META_KEY]);
+            // WooCommerce returns decoded metadata; direct SQL queries return serialized values.
+            $consent = maybe_unserialize($customer[Sender_Helper::EMAIL_MARKETING_META_KEY] ?? null);
+            if (is_array($consent)) {
+                $customer[Sender_Helper::EMAIL_MARKETING_META_KEY] = $consent;
             } else {
-                //Removing null values
+                // Unknown scalar values do not establish a consent state.
                 unset($customer[Sender_Helper::EMAIL_MARKETING_META_KEY]);
             }
 
@@ -859,7 +715,6 @@ class Sender_WooCommerce
                 unset($customer['newsletter']);
             }
 
-            $this->checkRateLimitation();
             $customFields = $this->senderBuildOrdersMetaFields($customer['email']);
             if (!empty($customFields)) {
                 $customer['fields'] = $customFields;
@@ -867,8 +722,7 @@ class Sender_WooCommerce
             $customersExportData[] = $customer;
         }
 
-        $this->checkRateLimitation();
-        $this->exportBatch(['customers' => $customersExportData]);
+        return $customersExportData;
     }
 
     public function senderUpdateCustomerData($email): bool
@@ -905,6 +759,12 @@ class Sender_WooCommerce
         return true;
     }
 
+    public static function usesHpos(): bool
+    {
+        return class_exists('Automattic\\WooCommerce\\Utilities\\OrderUtil')
+            && \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+    }
+
     public function senderBuildOrdersMetaFields($email): array
     {
         if (empty($email)) {
@@ -912,6 +772,28 @@ class Sender_WooCommerce
         }
 
         global $wpdb;
+        if (self::usesHpos()) {
+            // Use the billing address only when the order's own email is empty.
+            $ordersTable = $wpdb->prefix . 'wc_orders';
+            $summary = $wpdb->get_row($wpdb->prepare(
+                "SELECT totals.*, latest.currency FROM (
+                    SELECT COUNT(*) AS orders_count, SUM(o.total_amount) AS total_spent, MAX(o.id) AS last_id
+                    FROM $ordersTable o
+                    LEFT JOIN {$wpdb->prefix}wc_order_addresses billing
+                        ON billing.order_id = o.id AND billing.address_type = 'billing'
+                    WHERE o.type = 'shop_order' AND (o.billing_email = %s
+                        OR ((o.billing_email IS NULL OR o.billing_email = '') AND billing.email = %s))
+                ) totals JOIN $ordersTable latest ON latest.id = totals.last_id",
+                $email, $email
+            ), ARRAY_A);
+            if (!$summary) return [];
+            return [
+                'orders_count' => (int) $summary['orders_count'],
+                'total_spent' => (float) $summary['total_spent'],
+                'last_order_number' => '#' . $summary['last_id'],
+                'currency' => $summary['currency'],
+            ];
+        }
         $orders = $wpdb->get_col(
                 $wpdb->prepare(
                         "SELECT DISTINCT pm.post_id
@@ -946,6 +828,15 @@ class Sender_WooCommerce
     }
 
     public function sendUsersToSender($customers)
+    {
+        $data = $this->prepareRegisteredCustomers($customers);
+        if ($data) {
+            $this->checkRateLimitation();
+            $this->exportBatch(['customers' => $data]);
+        }
+    }
+
+    public function prepareRegisteredCustomers($customers): array
     {
         $customersExportData = [];
 
@@ -995,7 +886,6 @@ class Sender_WooCommerce
                 $data[Sender_Helper::EMAIL_MARKETING_META_KEY] = $emailConsent;
             }
 
-            $this->checkRateLimitation();
             $customFields = $this->senderBuildOrdersMetaFields($email);
             if (!empty($customFields)) {
                 $data['fields'] = $customFields;
@@ -1004,10 +894,7 @@ class Sender_WooCommerce
             $customersExportData[] = $data;
         }
 
-        if (!empty($customersExportData)) {
-            $this->checkRateLimitation();
-            $this->exportBatch(['customers' => $customersExportData]);
-        }
+        return $customersExportData;
     }
 
     public function exportProducts()
@@ -1162,144 +1049,149 @@ class Sender_WooCommerce
                 break;
             }
             foreach ($chunkedOrders as $wcOrder) {
-                $remoteId = $wcOrder->get_meta(Sender_Helper::SENDER_CART_META, true);
-                if (!$remoteId) {
-                    $remoteId = $wcOrder->get_order_key();
-                }
-
-                $billingCountry   = $wcOrder->get_billing_country();
-                $shippingCountry  = $wcOrder->get_shipping_country();
-                $billingPhoneRaw  = $wcOrder->get_billing_phone();
-                $shippingPhoneRaw = $wcOrder->get_shipping_phone();
-
-                $billingPhoneNormalized  = $this->normalizePhoneE164($billingPhoneRaw,  $billingCountry);
-                $billingPhoneNormalized  = $billingPhoneNormalized !== '' ? $billingPhoneNormalized : null;
-
-                $shippingPhoneNormalized = $this->normalizePhoneE164($shippingPhoneRaw, $shippingCountry);
-                $shippingPhoneNormalized = $shippingPhoneNormalized !== '' ? $shippingPhoneNormalized : null;
-
-                $customerIp = $wcOrder ? $wcOrder->get_customer_ip_address() : null;
-                $customerId = $wcOrder ? (int) ($wcOrder->get_customer_id() ?: $wcOrder->get_user_id()) : 0;
-
-                $orderData = [
-                        'status' => 'wc-' . $wcOrder->get_status(),
-                        'updated_at' => $wcOrder->get_date_modified() ? $wcOrder->get_date_modified()->date('Y-m-d H:i:s') : null,
-                        'created_at' => $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
-                        'remoteId' => $remoteId,
-                        'name' => (string) $wcOrder->get_order_number(),
-                        'currency' => $wcOrder->get_currency(),
-                        'orderId' => $wcOrder ? (string) $wcOrder->get_order_number() : '',
-                        'email' => $wcOrder->get_billing_email(),
-                        'firstname' => $wcOrder->get_billing_first_name(),
-                        'lastname' => $wcOrder->get_billing_last_name(),
-                ];
-
-                // only add if valid WP user is linked
-                if ($customerId > 0) {
-                    $orderData['customer_id'] = $customerId;
-                }
-
-                if ($billingPhoneNormalized !== null && $billingPhoneNormalized !== '') {
-                    $orderData['phone'] = $billingPhoneNormalized;
-                }
-
-                $paymentMethod       = $wcOrder->get_payment_method();
-                $paymentMethodTitle  = $wcOrder->get_payment_method_title();
-
-                $orderData['order_details'] = [
-                        'total'     => number_format((float) $wcOrder->get_total(), 2, '.', ''),
-                        'subtotal'  => number_format((float) $wcOrder->get_subtotal(), 2, '.', ''),
-                        'discount'  => number_format((float) $wcOrder->get_discount_total(), 2, '.', ''),
-                        'tax'       => number_format((float) $wcOrder->get_total_tax(), 2, '.', ''),
-                        'order_date'=> $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
-                ];
-
-                $billing = [
-                        'first_name' => $wcOrder->get_billing_first_name(),
-                        'last_name'  => $wcOrder->get_billing_last_name(),
-                        'company'    => $wcOrder->get_billing_company(),
-                        'address_1'  => $wcOrder->get_billing_address_1(),
-                        'address_2'  => $wcOrder->get_billing_address_2(),
-                        'city'       => $wcOrder->get_billing_city(),
-                        'state'      => $wcOrder->get_billing_state(),
-                        'postcode'   => $wcOrder->get_billing_postcode(),
-                        'country'    => $billingCountry,
-                        'email'      => $wcOrder->get_billing_email(),
-                        'phone'      => $billingPhoneNormalized,
-                        'payment_method' => $paymentMethod,
-                        'payment_method_title' => $paymentMethodTitle,
-                ];
-
-                $orderData['billing'] = array_filter($billing, function ($v) {
-                    return $v !== '' && $v !== null;
-                });
-
-                $shipping = [
-                        'first_name' => $wcOrder->get_shipping_first_name(),
-                        'last_name'  => $wcOrder->get_shipping_last_name(),
-                        'company'    => $wcOrder->get_shipping_company(),
-                        'address_1'  => $wcOrder->get_shipping_address_1(),
-                        'address_2'  => $wcOrder->get_shipping_address_2(),
-                        'city'       => $wcOrder->get_shipping_city(),
-                        'state'      => $wcOrder->get_shipping_state(),
-                        'postcode'   => $wcOrder->get_shipping_postcode(),
-                        'country'    => $shippingCountry,
-                        'phone'      => $shippingPhoneNormalized,
-                ];
-
-                $orderData['shipping'] = array_filter($shipping, function ($v) {
-                    return $v !== '' && $v !== null;
-                });
-
-                if (!empty($customerIp)) {
-                    $orderData['registration_ip'] = $customerIp;
-                    $orderData['billing']['customer_ip']  = $customerIp;
-                    $orderData['shipping']['customer_ip'] = $customerIp;
-                }
-
-                $orderData['products'] = [];
-                $orderPrice = 0;
-                foreach ($wcOrder->get_items('line_item') as $item) {
-                    // Woo's item setters reject IDs of deleted products on read;
-                    // their original references remain in order-item metadata.
-                    $productId = $item->get_product_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_product_id', true);
-                    $variationId = $item->get_variation_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_variation_id', true);
-                    $product = wc_get_product($variationId ?: $productId);
-                    $quantity = (float) $item->get_quantity();
-                    // Order lines preserve the purchased price even after catalog edits
-                    // or product deletion. Their totals already include coupon discounts.
-                    $price = $quantity > 0 ? (float) $item->get_total() / $quantity : 0;
-                    $oldPrice = $quantity > 0 ? (float) $item->get_subtotal() / $quantity : 0;
-                    $sku = $product ? $product->get_sku() : '';
-                    if (!$sku && $product && $product->is_type('variation')) {
-                        $parent = wc_get_product($product->get_parent_id());
-                        $sku = $parent ? $parent->get_sku() : '';
-                    }
-                    $productData = [
-                        'product_id' => $variationId ?: $productId,
-                        'sku' => $sku ?: null,
-                        'name' => $item->get_name(),
-                        'price' => (string) $price,
-                        'qty' => $item->get_quantity(),
-                        'currency' => $wcOrder->get_currency(),
-                        'image' => $productId ? get_the_post_thumbnail_url($productId) : false,
-                    ];
-                    if ($oldPrice > 0 && $price < $oldPrice) {
-                        $productData['old_price'] = (string) $oldPrice;
-                        $productData['discount'] = (string) round(100 - $price / $oldPrice * 100);
-                    }
-                    $orderData['products'][] = $productData;
-                    $orderPrice += (float) $item->get_total();
-                }
-
-                $orderData['price'] = $orderPrice;
-                $ordersExportData[] = $orderData;
+                $ordersExportData[] = $this->prepareOrder($wcOrder);
             }
 
             $this->checkRateLimitation();
             $this->exportBatch(['orders' => $ordersExportData]);
             $ordersExported += count($chunkedOrders);
         } while (count($chunkedOrders) === $chunkSize);
+    }
+
+    public function prepareOrder($wcOrder): array
+    {
+        $remoteId = $wcOrder->get_meta(Sender_Helper::SENDER_CART_META, true);
+        if (!$remoteId) {
+            $remoteId = $wcOrder->get_order_key();
+        }
+
+        $billingCountry   = $wcOrder->get_billing_country();
+        $shippingCountry  = $wcOrder->get_shipping_country();
+        $billingPhoneRaw  = $wcOrder->get_billing_phone();
+        $shippingPhoneRaw = $wcOrder->get_shipping_phone();
+
+        $billingPhoneNormalized  = $this->normalizePhoneE164($billingPhoneRaw,  $billingCountry);
+        $billingPhoneNormalized  = $billingPhoneNormalized !== '' ? $billingPhoneNormalized : null;
+
+        $shippingPhoneNormalized = $this->normalizePhoneE164($shippingPhoneRaw, $shippingCountry);
+        $shippingPhoneNormalized = $shippingPhoneNormalized !== '' ? $shippingPhoneNormalized : null;
+
+        $customerIp = $wcOrder ? $wcOrder->get_customer_ip_address() : null;
+        $customerId = $wcOrder ? (int) ($wcOrder->get_customer_id() ?: $wcOrder->get_user_id()) : 0;
+
+        $orderData = [
+                'status' => 'wc-' . $wcOrder->get_status(),
+                'updated_at' => $wcOrder->get_date_modified() ? $wcOrder->get_date_modified()->date('Y-m-d H:i:s') : null,
+                'created_at' => $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
+                'remoteId' => $remoteId,
+                'name' => (string) $wcOrder->get_order_number(),
+                'currency' => $wcOrder->get_currency(),
+                'orderId' => $wcOrder ? (string) $wcOrder->get_order_number() : '',
+                'email' => $wcOrder->get_billing_email(),
+                'firstname' => $wcOrder->get_billing_first_name(),
+                'lastname' => $wcOrder->get_billing_last_name(),
+        ];
+
+        // only add if valid WP user is linked
+        if ($customerId > 0) {
+            $orderData['customer_id'] = $customerId;
+        }
+
+        if ($billingPhoneNormalized !== null && $billingPhoneNormalized !== '') {
+            $orderData['phone'] = $billingPhoneNormalized;
+        }
+
+        $paymentMethod       = $wcOrder->get_payment_method();
+        $paymentMethodTitle  = $wcOrder->get_payment_method_title();
+
+        $orderData['order_details'] = [
+                'total'     => number_format((float) $wcOrder->get_total(), 2, '.', ''),
+                'subtotal'  => number_format((float) $wcOrder->get_subtotal(), 2, '.', ''),
+                'discount'  => number_format((float) $wcOrder->get_discount_total(), 2, '.', ''),
+                'tax'       => number_format((float) $wcOrder->get_total_tax(), 2, '.', ''),
+                'order_date'=> $wcOrder->get_date_created() ? $wcOrder->get_date_created()->date('Y-m-d H:i:s') : null,
+        ];
+
+        $billing = [
+                'first_name' => $wcOrder->get_billing_first_name(),
+                'last_name'  => $wcOrder->get_billing_last_name(),
+                'company'    => $wcOrder->get_billing_company(),
+                'address_1'  => $wcOrder->get_billing_address_1(),
+                'address_2'  => $wcOrder->get_billing_address_2(),
+                'city'       => $wcOrder->get_billing_city(),
+                'state'      => $wcOrder->get_billing_state(),
+                'postcode'   => $wcOrder->get_billing_postcode(),
+                'country'    => $billingCountry,
+                'email'      => $wcOrder->get_billing_email(),
+                'phone'      => $billingPhoneNormalized,
+                'payment_method' => $paymentMethod,
+                'payment_method_title' => $paymentMethodTitle,
+        ];
+
+        $orderData['billing'] = array_filter($billing, function ($v) {
+            return $v !== '' && $v !== null;
+        });
+
+        $shipping = [
+                'first_name' => $wcOrder->get_shipping_first_name(),
+                'last_name'  => $wcOrder->get_shipping_last_name(),
+                'company'    => $wcOrder->get_shipping_company(),
+                'address_1'  => $wcOrder->get_shipping_address_1(),
+                'address_2'  => $wcOrder->get_shipping_address_2(),
+                'city'       => $wcOrder->get_shipping_city(),
+                'state'      => $wcOrder->get_shipping_state(),
+                'postcode'   => $wcOrder->get_shipping_postcode(),
+                'country'    => $shippingCountry,
+                'phone'      => $shippingPhoneNormalized,
+        ];
+
+        $orderData['shipping'] = array_filter($shipping, function ($v) {
+            return $v !== '' && $v !== null;
+        });
+
+        if (!empty($customerIp)) {
+            $orderData['registration_ip'] = $customerIp;
+            $orderData['billing']['customer_ip']  = $customerIp;
+            $orderData['shipping']['customer_ip'] = $customerIp;
+        }
+
+        $orderData['products'] = [];
+        $orderPrice = 0;
+        foreach ($wcOrder->get_items('line_item') as $item) {
+            // Woo's item setters reject IDs of deleted products on read;
+            // their original references remain in order-item metadata.
+            $productId = $item->get_product_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_product_id', true);
+            $variationId = $item->get_variation_id() ?: (int) wc_get_order_item_meta($item->get_id(), '_variation_id', true);
+            $product = wc_get_product($variationId ?: $productId);
+            $quantity = (float) $item->get_quantity();
+            // Order lines preserve the purchased price even after catalog edits
+            // or product deletion. Their totals already include coupon discounts.
+            $price = $quantity > 0 ? (float) $item->get_total() / $quantity : 0;
+            $oldPrice = $quantity > 0 ? (float) $item->get_subtotal() / $quantity : 0;
+            $sku = $product ? $product->get_sku() : '';
+            if (!$sku && $product && $product->is_type('variation')) {
+                $parent = wc_get_product($product->get_parent_id());
+                $sku = $parent ? $parent->get_sku() : '';
+            }
+            $productData = [
+                'product_id' => $variationId ?: $productId,
+                'sku' => $sku ?: null,
+                'name' => $item->get_name(),
+                'price' => (string) $price,
+                'qty' => $item->get_quantity(),
+                'currency' => $wcOrder->get_currency(),
+                'image' => $productId ? get_the_post_thumbnail_url($productId) : false,
+            ];
+            if ($oldPrice > 0 && $price < $oldPrice) {
+                $productData['old_price'] = (string) $oldPrice;
+                $productData['discount'] = (string) round(100 - $price / $oldPrice * 100);
+            }
+            $orderData['products'][] = $productData;
+            $orderPrice += (float) $item->get_total();
+        }
+
+        $orderData['price'] = $orderPrice;
+        return $orderData;
     }
 
     public function senderProcessOrderFromWoocommerceDashboard($orderId, $senderUser)
@@ -1399,11 +1291,13 @@ class Sender_WooCommerce
         update_post_meta($orderId, Sender_Helper::SENDER_CART_META, $cart->id);
     }
 
+    public function logShopExport(string $step, string $message): void
+    {
+        $this->logExportDebugInfo($step, $message);
+    }
+
     private function logExportDebugInfo($step, $data)
     {
-        if ($this->syncActive) {
-            $this->updateSyncState('running');
-        }
         try {
             if (!is_writable(dirname($this->logFilePath))) {
                 error_log("[Sender Plugin] Log directory not writable.");

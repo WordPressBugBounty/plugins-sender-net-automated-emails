@@ -286,6 +286,14 @@ class Sender_Templates_Loader
         if (class_exists('WooCommerce')) {
             $info['woocommerce_version'] = WC()->version;
         }
+        if (class_exists('Sender_Shop_Sync_Support')) {
+            $snapshot = Sender_Shop_Sync_Support::status();
+            if (!is_wp_error($snapshot)) $info['shop_sync'] = $snapshot->get_data();
+        } elseif (class_exists('Sender_Helper')) {
+            require_once __DIR__ . '/../includes/Sender_Shop_Sync_Support.php';
+            $snapshot = Sender_Shop_Sync_Support::status();
+            if (!is_wp_error($snapshot)) $info['shop_sync'] = $snapshot->get_data();
+        }
 
         $info['settings'] = [];
         foreach ($this->sender->getAvailableSettings() as $key => $default) {

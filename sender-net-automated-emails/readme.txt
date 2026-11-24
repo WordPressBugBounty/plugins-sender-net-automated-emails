@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.12.1
+Stable tag: 2.12.2
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -487,3 +487,8 @@ purchased
 * Added store identification to cart deletion requests for accounts with multiple connected stores.
 * Protected order confirmation callbacks with order ownership checks.
 * Improved cart tracking retries and newsletter consent persistence.
+= 2.12.2 2026-11-23 =
+* Export shop data in resumable background batches using WooCommerce's scheduler.
+* Recover interrupted exports without restarting completed batches, with bounded retries and cancellation between batches.
+* Include batch progress and response diagnostics in authenticated sync status and support downloads.
+* Read JSON webhook bodies when Content-Type metadata is altered and report safe missing-body diagnostics.

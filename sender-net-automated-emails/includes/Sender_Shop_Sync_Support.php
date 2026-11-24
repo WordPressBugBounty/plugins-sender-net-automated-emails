@@ -41,6 +41,10 @@ class Sender_Shop_Sync_Support
         $cancelledAt = array_key_exists('cancel_requested_at', $state) && $state['cancel_requested_at'] === null
             ? null : Sender_Helper::getSyncCancellationRequestedAt($state);
         $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        if (($state['format'] ?? null) === 2 && class_exists('Sender_Shop_Export')) {
+            $batchDue = Sender_Shop_Export::nextScheduled($state);
+            if ($batchDue) $scheduled = $scheduled ? min($scheduled, $batchDue) : $batchDue;
+        }
         $worker = get_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, []);
         $schedule = get_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, []);
         $worker = is_array($worker) ? $worker : [];
@@ -56,6 +60,8 @@ class Sender_Shop_Sync_Support
                 'idle_seconds' => $updatedEpoch ? max(0, time() - $updatedEpoch) : null,
                 'cancellation_retry_after_seconds' => $status === 'cancelling' && $cancelledAt
                     ? max(0, $cancelledAt + Sender_Helper::SYNC_CANCELLATION_TIMEOUT - time()) : null,
+                // Explicitly select metadata: never return pending customer/order payloads or email cursors.
+                'progress' => self::progress($state),
             ],
             'scheduler' => [
                 'scheduled_at_utc' => $scheduled ? gmdate('Y-m-d H:i:s', $scheduled) : null,
@@ -68,6 +74,23 @@ class Sender_Shop_Sync_Support
                 'last_schedule_error_code' => self::identifier($schedule['error_code'] ?? null),
             ],
         ], 200);
+    }
+
+    private static function progress(array $state): array
+    {
+        $data = [];
+        foreach (['phase', 'operation', 'last_error'] as $key) {
+            $value = $state[$key] ?? null;
+            $data[$key] = is_string($value) && preg_match('/\A[a-z0-9_]{1,64}\z/', $value) ? $value : null;
+        }
+        foreach (['batches_accepted', 'customers_accepted', 'orders_accepted', 'failures', 'recoveries'] as $key) {
+            $data[$key] = isset($state[$key]) && is_numeric($state[$key]) ? max(0, (int) $state[$key]) : 0;
+        }
+        $response = is_array($state['last_response'] ?? null) ? $state['last_response'] : [];
+        $data['last_http_status'] = isset($response['http_status']) && is_int($response['http_status'])
+            ? $response['http_status'] : null;
+        $data['last_response_at_utc'] = Sender_Helper::validateSyncDate($response['at_utc'] ?? null);
+        return $data;
     }
 
     public static function cancel(array $data)
