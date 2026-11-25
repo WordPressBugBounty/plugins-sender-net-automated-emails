@@ -304,16 +304,26 @@ class Sender_Helper
         throw new \RuntimeException('Unable to persist sync progress.');
     }
 
+    public static function nextSyncEvent(array $state, &$source = null)
+    {
+        if (($state['format'] ?? null) === 2 && class_exists('Sender_Shop_Export')) {
+            return Sender_Shop_Export::nextScheduled($state, $source);
+        }
+        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        $source = $scheduled ? 'wp_cron_starter' : null;
+        return $scheduled;
+    }
+
     public static function getSyncDiagnostics(array $state): array
     {
         $now = time();
-        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        $scheduled = self::nextSyncEvent($state);
         $lock = get_transient('doing_cron');
         return [
             'checked_at_utc' => gmdate('Y-m-d H:i:s', $now),
             'eligible_at_utc' => isset($state['not_before']) ? gmdate('Y-m-d H:i:s', $state['not_before']) : null,
-            'scheduled_at_utc' => $scheduled ? gmdate('Y-m-d H:i:s', $scheduled) : null,
-            'overdue_seconds' => $scheduled ? max(0, $now - $scheduled) : null,
+            'scheduled_at_utc' => is_int($scheduled) ? gmdate('Y-m-d H:i:s', $scheduled) : null,
+            'overdue_seconds' => is_int($scheduled) ? max(0, $now - $scheduled) : null,
             'wp_cron_disabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
             'alternate_wp_cron' => defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON,
             'cron_lock_age_seconds' => is_numeric($lock) ? max(0, (int) floor(microtime(true) - (float) $lock)) : null,

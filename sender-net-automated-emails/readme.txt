@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.12.2
+Stable tag: 2.12.3
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -492,3 +492,6 @@ purchased
 * Recover interrupted exports without restarting completed batches, with bounded retries and cancellation between batches.
 * Include batch progress and response diagnostics in authenticated sync status and support downloads.
 * Read JSON webhook bodies when Content-Type metadata is altered and report safe missing-body diagnostics.
+= 2.12.3 =
+* Queue shop exports directly in WooCommerce Action Scheduler and pick up overdue exports queued by older versions.
+* Fixed overlapping cart updates creating multiple tracked carts for a signed-in shopper in the same WooCommerce session.

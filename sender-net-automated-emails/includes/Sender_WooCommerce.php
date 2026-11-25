@@ -74,17 +74,25 @@ class Sender_WooCommerce
         if (!$state) {
             return Sender_Helper::getSyncState()['status'] === 'running';
         }
-        if (wp_next_scheduled('sender_export_shop_data_cron')) {
+        if (($state['format'] ?? null) === 2 && Sender_Shop_Export::nextScheduled($state)) return true;
+        $starter = wp_next_scheduled('sender_export_shop_data_cron');
+        $scheduleBatch = !empty($state['job_id'])
+            && (($state['format'] ?? null) === 2 || Sender_Shop_Export::schedulerAvailable());
+        if (!$scheduleBatch && $starter) {
             return true;
         }
         delete_option(Sender_Helper::TRANSIENT_SYNC_FINISHED);
         delete_transient(Sender_Helper::TRANSIENT_SYNC_FINISHED);
         $timestamp = max(time(), $state['not_before'] ?? 0);
-        $result = wp_schedule_single_event($timestamp, 'sender_export_shop_data_cron', [], true);
-        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
+        if ($scheduleBatch) {
+            $result = $this->shopExport->scheduleFirstBatch($state['job_id']);
+            if ($result && $starter) wp_unschedule_event($starter, 'sender_export_shop_data_cron');
+        } else {
+            $result = wp_schedule_single_event($timestamp, 'sender_export_shop_data_cron', [], true);
+        }
         // Another request may have scheduled or claimed the event in the meantime.
         $current = Sender_Helper::getSyncState();
-        $accepted = (bool) $scheduled || in_array($current['status'], ['running', 'completed'], true);
+        $accepted = (bool) Sender_Helper::nextSyncEvent($current) || in_array($current['status'], ['running', 'completed'], true);
         update_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, [
             'attempted_at_utc' => gmdate('Y-m-d H:i:s'),
             'attempted_at' => time(),
@@ -111,12 +119,13 @@ class Sender_WooCommerce
         if (defined('DOING_CRON') && DOING_CRON) {
             return;
         }
-        $state = Sender_Helper::getSyncState();
-        if ($state['status'] !== 'queued' || wp_next_scheduled('sender_export_shop_data_cron')) {
+        if ($current['status'] !== 'queued') return;
+        $starter = wp_next_scheduled('sender_export_shop_data_cron');
+        if ($starter && ($starter > time() || !Sender_Shop_Export::schedulerAvailable() || empty($current['job_id']))) {
             return;
         }
         $lastAttempt = get_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, []);
-        if (($lastAttempt['eligible_at'] ?? null) === ($state['not_before'] ?? null)
+        if (($lastAttempt['eligible_at'] ?? null) === ($current['not_before'] ?? null)
             && time() - ($lastAttempt['attempted_at'] ?? 0) < 30) {
             return;
         }

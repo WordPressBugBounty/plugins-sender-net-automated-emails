@@ -40,11 +40,10 @@ class Sender_Shop_Sync_Support
         // Preserve unknown diagnostic time for an explicitly null modern field.
         $cancelledAt = array_key_exists('cancel_requested_at', $state) && $state['cancel_requested_at'] === null
             ? null : Sender_Helper::getSyncCancellationRequestedAt($state);
-        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
-        if (($state['format'] ?? null) === 2 && class_exists('Sender_Shop_Export')) {
-            $batchDue = Sender_Shop_Export::nextScheduled($state);
-            if ($batchDue) $scheduled = $scheduled ? min($scheduled, $batchDue) : $batchDue;
-        }
+        $scheduled = Sender_Helper::nextSyncEvent($state, $source);
+        // This is WooCommerce's next scheduled cron tick. The host controls when it actually runs.
+        $runnerDue = $source === 'action_scheduler_batch'
+            ? wp_next_scheduled('action_scheduler_run_queue', ['WP Cron']) : false;
         $worker = get_option(Sender_Helper::SYNC_WORKER_DEBUG_OPTION, []);
         $schedule = get_option(Sender_Helper::SYNC_SCHEDULE_DEBUG_OPTION, []);
         $worker = is_array($worker) ? $worker : [];
@@ -64,7 +63,10 @@ class Sender_Shop_Sync_Support
                 'progress' => self::progress($state),
             ],
             'scheduler' => [
-                'scheduled_at_utc' => $scheduled ? gmdate('Y-m-d H:i:s', $scheduled) : null,
+                'scheduled_at_utc' => is_int($scheduled) ? gmdate('Y-m-d H:i:s', $scheduled) : null,
+                'scheduled_via' => $source,
+                'action_scheduler_cron_due_at_utc' => $runnerDue ? gmdate('Y-m-d H:i:s', $runnerDue) : null,
+                'overdue_seconds' => is_int($scheduled) && empty($state['attempt_id']) ? max(0, time() - $scheduled) : null,
                 'automatic_cron_disabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
                 'last_worker_entered_at_utc' => Sender_Helper::validateSyncDate($worker['entered_at_utc'] ?? null),
                 'last_worker_claim_result' => self::identifier($worker['claim_result'] ?? null),

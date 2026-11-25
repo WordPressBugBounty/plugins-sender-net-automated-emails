@@ -44,21 +44,25 @@ class Sender_Shop_Export
         add_action(self::RECOVERY_ACTION, [$this, 'recover'], 10, 1);
     }
 
-    private static function schedulerAvailable(): bool
+    public static function schedulerAvailable(): bool
     {
         return function_exists('as_schedule_single_action') && function_exists('as_get_scheduled_actions')
             && function_exists('as_has_scheduled_action') && did_action('action_scheduler_init');
     }
 
-    public static function nextScheduled(array $job)
+    public static function nextScheduled(array $job, &$source = null)
     {
         if (empty($job['job_id'])) return false;
         $args = [$job['job_id'], (int) ($job['work_seq'] ?? 0)];
         $next = wp_next_scheduled(self::CRON_ACTION, $args);
+        $source = $next ? 'wp_cron_batch' : null;
         if (self::schedulerAvailable()) {
             $scheduled = as_next_scheduled_action(self::ACTION, $args, self::GROUP);
-            if ($scheduled) $next = $next ? min($next, $scheduled === true ? time() : $scheduled)
-                : ($scheduled === true ? time() : $scheduled);
+            // A running or undated async action returns true. Prefer a known due time when both queues have work.
+            if ($scheduled !== false && (!$next || (is_int($scheduled) && $scheduled <= $next))) {
+                $source = 'action_scheduler_batch';
+                $next = $scheduled;
+            }
         }
         return $next;
     }
@@ -72,17 +76,32 @@ class Sender_Shop_Export
             return $this->enqueue($state);
         }
         if (($state['status'] ?? '') !== 'queued') return false;
-        $job = Sender_Helper::claimSyncJob($reason, [
-            'format' => 2, 'phase' => self::PHASE_COMPLETED_CUSTOMERS, 'cursor' => '',
-            'work_seq' => 0, 'attempt_id' => null, 'lease_until' => 0, 'operation' => 'scheduled',
-            'failures' => 0, 'recoveries' => 0, 'batches_accepted' => 0,
-            'customers_accepted' => 0, 'orders_accepted' => 0, 'store' => (string) get_option('sender_store_register'),
-        ]);
+        $job = Sender_Helper::claimSyncJob($reason, $this->initialState());
         $this->recordWorker($reason);
         if (!$job) return false;
         wp_clear_scheduled_hook('sender_export_shop_data_cron');
         $this->exporter->logShopExport('Start', 'Resumable shop export scheduled.');
         return $this->enqueue($job);
+    }
+
+    private function initialState(): array
+    {
+        return [
+            'format' => 2, 'phase' => self::PHASE_COMPLETED_CUSTOMERS, 'cursor' => '',
+            'work_seq' => 0, 'attempt_id' => null, 'lease_until' => 0, 'operation' => 'scheduled',
+            'failures' => 0, 'recoveries' => 0, 'batches_accepted' => 0,
+            'customers_accepted' => 0, 'orders_accepted' => 0, 'store' => (string) get_option('sender_store_register'),
+        ];
+    }
+
+    /** Hand a queued job to WooCommerce without running the export in the current request. */
+    public function scheduleFirstBatch(string $jobId): bool
+    {
+        $job = Sender_Helper::changeSyncJob($jobId, function ($current) {
+            if ($current['status'] !== 'queued') return false;
+            return $current + $this->initialState();
+        });
+        return $job && $this->enqueue($job);
     }
 
     private function enqueue(array $job, int $delay = 0): bool

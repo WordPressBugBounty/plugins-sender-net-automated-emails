@@ -1,7 +1,7 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-/** Share only Sender's cart binding between requests that loaded the same Woo guest session. */
+/** Share Sender's cart binding between requests that loaded the same WooCommerce session. */
 final class Sender_Guest_Cart_Session
 {
     private const REVISION = 'sender_cart_binding_revision';
@@ -15,9 +15,10 @@ final class Sender_Guest_Cart_Session
     private $running = false;
     private $late = false;
 
-    private function guestCookie($session)
+    private function sessionCookie($session)
     {
-        if (is_user_logged_in() || !$session instanceof WC_Session_Handler) return null;
+        if (!$session instanceof WC_Session_Handler) return null;
+        if (is_user_logged_in() && (string) $session->get_customer_id() !== (string) get_current_user_id()) return null;
         $cookie = $session->get_session_cookie();
         if (!$cookie || (string) $cookie[0] !== (string) $session->get_customer_id() || (int) $cookie[1] <= time()) return null;
         return $cookie;
@@ -32,7 +33,7 @@ final class Sender_Guest_Cart_Session
     /** Read the latest committed proof even when another request is still working. */
     public function refresh($session): void
     {
-        $cookie = $this->guestCookie($session);
+        $cookie = $this->sessionCookie($session);
         if ($cookie && !$this->running) $this->loadBinding($session, $this->lockKey($cookie[0]));
     }
 
@@ -62,7 +63,7 @@ final class Sender_Guest_Cart_Session
 
     public function run($session, callable $operation)
     {
-        $cookie = $this->guestCookie($session);
+        $cookie = $this->sessionCookie($session);
         if ($this->running || !$cookie) return $operation();
         global $wpdb;
         $key = $this->lockKey($cookie[0]);

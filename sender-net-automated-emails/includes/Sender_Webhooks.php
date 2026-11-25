@@ -29,23 +29,48 @@ class Sender_Webhooks
     {
         $this->sender = $sender;
         add_action('rest_api_init', [$this, 'sender_register_webhook_topic_handler']);
+        add_filter('rest_post_dispatch', [$this, 'diagnoseMissingWebhookRoute'], 10, 3);
     }
 
-    public function webhook_permission_callback($request)
+    private function hasCallbackKey($request): bool
     {
         $receivedApiKey = $request->get_header('sender-api-key');
         $storedApiKey = get_option('sender_api_key');
 
-        if (is_string($storedApiKey) && $storedApiKey !== '' && is_string($receivedApiKey)
-            && hash_equals($storedApiKey, $receivedApiKey)) {
-            return true;
-        } else {
-            $data = $request->get_json_params();
-            if (isset($data['sender_resource_key']) && isset($data['topic']) && $data['topic'] === self::TOPIC_PLUGIN_VERSION){
-                return true;
-            }
-            return false;
+        return is_string($storedApiKey) && $storedApiKey !== '' && is_string($receivedApiKey)
+            && hash_equals($storedApiKey, $receivedApiKey);
+    }
+
+    public function webhook_permission_callback($request)
+    {
+        if ($this->hasCallbackKey($request)) return true;
+        $data = $request->get_json_params();
+        return isset($data['sender_resource_key'], $data['topic']) && $data['topic'] === self::TOPIC_PLUGIN_VERSION;
+    }
+
+    /** A routing failure never enters sender_webhook_handler(). */
+    public function diagnoseMissingWebhookRoute($response, $server, $request)
+    {
+        $route = '/' . self::WEBHOOK_NAMESPACE . self::WEBHOOK_HANDLER;
+        if ($request->get_route() !== $route || $response->get_status() !== 404
+            || $request->get_header('x-sender-route-debug') !== '1') return $response;
+        $data = $response->get_data();
+        if (($data['code'] ?? null) !== 'rest_no_route' || !$this->hasCallbackKey($request)) return $response;
+
+        $routes = $server->get_routes();
+        $postRegistered = false;
+        foreach ($routes[$route] ?? [] as $endpoint) {
+            if (!empty($endpoint['methods']['POST'])) $postRegistered = true;
         }
+        $method = $request->get_method();
+        $data['sender_route_debug'] = [
+            'method' => in_array($method, ['GET', 'HEAD', 'POST', 'OPTIONS', 'PUT', 'PATCH', 'DELETE'], true) ? $method : 'other',
+            'post_registered' => $postRegistered,
+            'body_bytes' => strlen((string) $request->get_body()),
+        ];
+        $response->set_data($data);
+        $response->header('Cache-Control', 'private, no-store');
+        return $response;
     }
 
     public function sender_register_webhook_topic_handler()
@@ -122,8 +147,8 @@ class Sender_Webhooks
         // Pass the delay explicitly: do_action without arguments supplies an empty string.
         do_action('sender_schedule_sync_cron_job', 5);
 
-        $scheduled = wp_next_scheduled('sender_export_shop_data_cron');
         $state = Sender_Helper::getSyncState();
+        $scheduled = Sender_Helper::nextSyncEvent($state);
         $completedNewJob = $state['status'] === 'completed' && $state !== $previousState;
         if ($state['status'] !== 'running' && !$completedNewJob
             && !($state['status'] === 'queued' && $scheduled)) {
