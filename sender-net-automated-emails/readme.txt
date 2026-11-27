@@ -4,7 +4,7 @@ Tags: email marketing, signup forms, newsletter, email automation, popup
 Requires at least: 4.7.0
 Tested up to: 7.1
 Requires PHP: 7.1
-Stable tag: 2.12.3
+Stable tag: 2.12.4
 License: GPLv3 or later License
 URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -495,3 +495,6 @@ purchased
 = 2.12.3 =
 * Queue shop exports directly in WooCommerce Action Scheduler and pick up overdue exports queued by older versions.
 * Fixed overlapping cart updates creating multiple tracked carts for a signed-in shopper in the same WooCommerce session.
+= 2.12.4 =
+* Fixed subscriber phone number capture before order submission in Classic and Blocks WooCommerce checkout.
+* Added instructions for embedding Sender forms in WordPress, with a Forms tab for WooCommerce sites.

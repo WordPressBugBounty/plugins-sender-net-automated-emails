@@ -9,8 +9,9 @@ jQuery(document).ready(function () {
     var nameSelector = 'input#billing_first_name, input#billing_last_name, ' +
         'input#billing-first_name, input#billing-last_name, ' +
         'input#shipping-first_name, input#shipping-last_name';
+    var phoneSelector = 'input#billing_phone, input#billing-phone, input#shipping-phone';
 
-    function checkoutName(classicId, billingId, shippingId) {
+    function checkoutAddressField(classicId, billingId, shippingId) {
         var field = jQuery(classicId + ', ' + billingId).filter(':visible').first();
         // Blocks uses the shipping address for billing when no separate billing form is shown.
         if (!field.length) {
@@ -44,8 +45,9 @@ jQuery(document).ready(function () {
         var data = {
             action: 'trigger_backend_hook',
             email: emailValue,
-            firstname: checkoutName('input#billing_first_name', 'input#billing-first_name', 'input#shipping-first_name'),
-            lastname: checkoutName('input#billing_last_name', 'input#billing-last_name', 'input#shipping-last_name'),
+            firstname: checkoutAddressField('input#billing_first_name', 'input#billing-first_name', 'input#shipping-first_name'),
+            lastname: checkoutAddressField('input#billing_last_name', 'input#billing-last_name', 'input#shipping-last_name'),
+            phone: checkoutAddressField('input#billing_phone', 'input#billing-phone', 'input#shipping-phone').trim(),
             newsletter: jQuery('input[name="sender_newsletter"]:checked, input#sender-newsletter-checkbox-subscribe:checked').length > 0 ? 1 : 0,
             newsletter_changed: lastNewsletterChoice !== null ? 1 : 0
         };
@@ -126,7 +128,7 @@ jQuery(document).ready(function () {
         });
     }
 
-    jQuery(document.body).on('change blur', emailSelector + ', ' + nameSelector, handleCheckoutFieldChange);
+    jQuery(document.body).on('change blur', emailSelector + ', ' + nameSelector + ', ' + phoneSelector, handleCheckoutFieldChange);
 
     var lastNewsletterChoice = null;
     // WooCommerce replaces the payment section (including these inputs) during

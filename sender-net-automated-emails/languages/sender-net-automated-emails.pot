@@ -2,9 +2,9 @@
 # This file is distributed under the GPLv3.
 msgid ""
 msgstr ""
-"Project-Id-Version: Sender Net Automated Emails 2.12.0\n"
+"Project-Id-Version: Sender Net Automated Emails 2.12.4\n"
 "Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/sender-net-automated-emails/\n"
-"POT-Creation-Date: 2026-11-10 09:51+0200\n"
+"POT-Creation-Date: 2026-11-27 12:51+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,6 +17,7 @@ msgstr ""
 
 #: divi-extension/includes/modules/SenderForm/SenderForm.php:14
 #: includes/Sender_Forms_Widget.php:23
+#: templates/forms-guide.php:50
 msgid "Sender.net Form"
 msgstr ""
 
@@ -440,16 +441,62 @@ msgstr ""
 msgid "Download support file"
 msgstr ""
 
-#: templates/settings.php:521
-msgid "Sender.net forms"
+#: templates/forms-guide.php:12 templates/settings.php:169
+msgid "Forms"
 msgstr ""
 
-#: templates/settings.php:521
-msgid "You can now find your"
+#: templates/forms-guide.php:13
+msgid "Add an active embedded form from Sender to your WordPress site."
 msgstr ""
 
-#: templates/settings.php:521
-msgid "in WordPress widgets or in the page builder."
+#: templates/forms-guide.php:16
+msgid "Manage forms in Sender"
+msgstr ""
+
+#: templates/forms-guide.php:20
+msgid "Add a form to WordPress"
+msgstr ""
+
+#: templates/forms-guide.php:25
+msgid "Block editor"
+msgstr ""
+
+#. translators: %s: Sender form block name.
+#: templates/forms-guide.php:28
+#, php-format
+msgid "Open a page or post, insert %s, and select your form."
+msgstr ""
+
+#: templates/forms-guide.php:35
+msgid "WordPress widgets"
+msgstr ""
+
+#. translators: %1$s: WordPress Widgets menu path. %2$s: Sender form widget name.
+#: templates/forms-guide.php:38
+#, php-format
+msgid "If your theme has widget areas, go to %1$s, add %2$s, and select your form."
+msgstr ""
+
+#: templates/forms-guide.php:39
+msgid "Appearance → Widgets"
+msgstr ""
+
+#: templates/forms-guide.php:46
+msgid "Divi Builder"
+msgstr ""
+
+#. translators: %s: Sender form module name.
+#: templates/forms-guide.php:49
+#, php-format
+msgid "Add the %s module and select your form in its settings."
+msgstr ""
+
+#: templates/forms-guide.php:58
+msgid "Form missing?"
+msgstr ""
+
+#: templates/forms-guide.php:59
+msgid "Check that it’s an active embedded form in Sender. Then reopen your editor."
 msgstr ""
 
 #: templates/settings.php:604

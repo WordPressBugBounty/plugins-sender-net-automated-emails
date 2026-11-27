@@ -240,7 +240,8 @@ class Sender_API
         if (isset($user->user_email)) {
             $firstname = !empty($user->first_name) ? $user->first_name : get_user_meta($userId, 'billing_first_name', true);
             $lastname = !empty($user->last_name) ? $user->last_name : get_user_meta($userId, 'billing_last_name', true);
-            $phone = get_user_meta($userId, 'billing_phone', true);
+            $hasCheckoutPhone = (int) $userId === get_current_user_id() && array_key_exists('phone', $checkoutData);
+            $phone = $hasCheckoutPhone ? $checkoutData['phone'] : get_user_meta($userId, 'billing_phone', true);
 
             $data = [
                 'resource_key' => $this->senderGetResourceKey(),
@@ -283,16 +284,11 @@ class Sender_API
                 }
             }
 
-            $params = array_merge($this->senderBaseRequestArguments(), [
-                'body' => json_encode($data),
-            ]);
-
-            $response = $this->sender_remote_post($this->senderStatsBaseUrl . 'create_subscriber', $params);
-            return $this->senderBuildStatsResponse($response);
+            return $this->senderSaveTrackedSubscriber($data, $hasCheckoutPhone);
         }
     }
 
-    public function senderTrackNotRegisteredUsers($userData)
+    public function senderTrackNotRegisteredUsers($userData, bool $checkout = false)
     {
         if (isset($userData['email'])) {
             $userData['store_id'] = get_option('sender_store_register') ?: '';
@@ -303,14 +299,26 @@ class Sender_API
                 $userData['newsletter'] = (bool) $userData['newsletter'];
             }
 
-            $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($userData)]);
-            $response = $this->sender_remote_post(
-                $this->senderStatsBaseUrl . 'create_subscriber',
-                $params
-            );
-
-            return $this->senderBuildStatsResponse($response);
+            return $this->senderSaveTrackedSubscriber($userData, $checkout);
         }
+    }
+
+    private function senderSaveTrackedSubscriber(array $data, bool $checkout)
+    {
+        // The commerce endpoint treats newsletter=true plus a phone as SMS marketing opt-in.
+        if ($checkout && !empty($data['phone']) && !empty($data['newsletter'])) {
+            $emailData = $data;
+            unset($emailData['phone']);
+            $response = $this->senderSaveTrackedSubscriber($emailData, false);
+            if (empty($response->subscriber_id)) {
+                return $response;
+            }
+            unset($data['newsletter']);
+        }
+
+        $params = array_merge($this->senderBaseRequestArguments(), ['body' => json_encode($data)]);
+        $response = $this->sender_remote_post($this->senderStatsBaseUrl . 'create_subscriber', $params);
+        return $this->senderBuildStatsResponse($response);
     }
 
     public function senderTrackRegisterUserCallback($userId)

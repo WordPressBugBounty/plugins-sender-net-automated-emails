@@ -87,7 +87,7 @@ class Sender_Carts
         add_action('enqueue_block_editor_assets', [$this, 'senderSubscribeNewsletterBlockEnqueueAssets']);
         add_filter('render_block', [$this, 'senderRenderCheckoutNewsletter'], 10, 2);
 
-        //Capture email when filling checkout details
+        // Capture contact information while the shopper fills in checkout.
         add_action('wp_ajax_trigger_backend_hook', [$this,'triggerEmailCheckout']);
         add_action('wp_ajax_nopriv_trigger_backend_hook', [$this,'triggerEmailCheckout']);
 
@@ -1036,20 +1036,36 @@ class Sender_Carts
             return wp_send_json_error('Email must match the logged-in customer', 403);
         }
 
-        $names = [];
+        $profile = [];
         foreach (['firstname', 'lastname'] as $field) {
             if (isset($_POST[$field]) && is_string($_POST[$field])) {
                 $name = sanitize_text_field(wp_unslash($_POST[$field]));
                 if ($name !== '') {
-                    $names[$field] = $name;
+                    $profile[$field] = $name;
                 }
             }
         }
+        $checkoutPhone = null;
+        if (array_key_exists('phone', $_POST)) {
+            $checkoutPhone = '';
+            if (is_string($_POST['phone'])) {
+                $phone = trim(wp_unslash($_POST['phone']));
+                $digits = preg_replace('/\D/', '', $phone);
+                if (strlen($phone) <= 60 && strlen($digits) >= 7 && strlen($digits) <= 17
+                        && WC_Validation::is_phone($phone)) {
+                    $checkoutPhone = $phone;
+                }
+            }
+        }
+
         $senderUser = (new Sender_User())->findBy('email', $sanitizedEmail);
         if (is_user_logged_in() && $senderUser
                 && (!$senderUser->wp_user_id || (int) $senderUser->wp_user_id === get_current_user_id())) {
-            if ($names || isset($_POST['newsletter'])) {
-                $payload = $names;
+            if ($profile || $checkoutPhone !== null || isset($_POST['newsletter'])) {
+                $payload = $profile;
+                if ($checkoutPhone !== null) {
+                    $payload['phone'] = $checkoutPhone;
+                }
                 $newsletter = Sender_Helper::submittedNewsletterConsent('newsletter', 'newsletter_changed');
                 if ($newsletter !== null) {
                     $payload['newsletter'] = $newsletter;
@@ -1081,8 +1097,11 @@ class Sender_Carts
         $trackNotRegisteredUserPayload = array_merge([
                 'email' => $sanitizedEmail,
                 'newsletter' => $newsletter
-        ], $names);
-        $response = $this->sender->senderApi->senderTrackNotRegisteredUsers($trackNotRegisteredUserPayload);
+        ], $profile);
+        if ($checkoutPhone !== null && $checkoutPhone !== '') {
+            $trackNotRegisteredUserPayload['phone'] = $checkoutPhone;
+        }
+        $response = $this->sender->senderApi->senderTrackNotRegisteredUsers($trackNotRegisteredUserPayload, true);
 
         if (!$response || !isset($response->subscriber_id) || empty($response->subscriber_id)) {
             return wp_send_json_error('Subscriber not created');

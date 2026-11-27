@@ -50,7 +50,7 @@
     echo 'sender-single-column sender-d-flex';
 } ?>">
     <div class="sender-flex-column">
-        <?php if (Sender_Helper::isSyncRunning() || $syncFailed || $syncCancelMessage) : ?>
+        <?php if ($wooEnabled && (Sender_Helper::isSyncRunning() || $syncFailed || $syncCancelMessage)) : ?>
             <div id="sender-sync-notice" class="notice <?php echo $syncFailed ? 'notice-error' : ($syncState['status'] === 'cancelled' ? 'notice-warning' : 'notice-info'); ?> is-dismissible">
                 <p>
                     <strong class="sender-sync-notice-text"><?php echo esc_html($syncNoticeMessages[$syncState['status']] ?? $syncNoticeMessages['unknown']); ?></strong>
@@ -161,11 +161,12 @@
                     </div>
                 </div>
             </div>
-            <?php if ($wooEnabled) { ?>
-                <div id="sender-store-tools" class="sender-store-tools sender-box sender-br-5">
+            <div id="sender-store-tools" class="sender-store-tools sender-box sender-br-5<?php echo $wooEnabled ? '' : ' sender-forms-standalone'; ?>">
+                <?php if ($wooEnabled) { ?>
                     <div class="sender-tools-tabs" role="tablist" aria-label="<?php esc_attr_e('Sender settings', 'sender-net-automated-emails'); ?>">
                         <button type="button" id="sender-tab-settings" class="sender-tools-tab" role="tab" aria-selected="true" aria-controls="sender-settings-panel" tabindex="0"><?php esc_html_e('Settings', 'sender-net-automated-emails'); ?></button>
                         <button type="button" id="sender-tab-sync" class="sender-tools-tab" role="tab" aria-selected="false" aria-controls="sender-sync-panel" tabindex="-1"><?php esc_html_e('Sync', 'sender-net-automated-emails'); ?></button>
+                        <button type="button" id="sender-tab-forms" class="sender-tools-tab" role="tab" aria-selected="false" aria-controls="sender-forms-panel" tabindex="-1"><?php esc_html_e('Forms', 'sender-net-automated-emails'); ?></button>
                         <button type="button" id="sender-tab-debug" class="sender-tools-tab" role="tab" aria-selected="false" aria-controls="sender-debug-panel" tabindex="-1"><?php esc_html_e('Support', 'sender-net-automated-emails'); ?></button>
                     </div>
                     <form method="post" action="" id="sender-form-settings">
@@ -514,17 +515,15 @@
                         <?php esc_html_e('Download support file', 'sender-net-automated-emails'); ?>
                     </a>
                 </div>
-                </div>
-            <?php } else { ?>
-            <div class="sender-box sender-br-5 sender-p-relative" style="padding-top:0px!important">
-                <?php
-                echo '<p>' . esc_html__('You can now find your', 'sender-net-automated-emails') . ' <a target="_blank" class="sender-link" href="https://app.sender.net/forms">' . esc_html__('Sender.net forms', 'sender-net-automated-emails') . '</a> ' . esc_html__('in WordPress widgets or in the page builder.', 'sender-net-automated-emails') . '</p>';
-                ?>
+                <?php } ?>
+                <section id="sender-forms-panel" class="sender-tools-panel"
+                         <?php if ($wooEnabled) { ?>role="tabpanel" aria-labelledby="sender-tab-forms" hidden<?php } else { ?>aria-labelledby="sender-forms-title"<?php } ?>>
+                    <?php require __DIR__ . '/forms-guide.php'; ?>
+                </section>
             </div>
         </div>
-    <?php } ?>
+        <?php } ?>
     </div>
-    <?php } ?>
 </div>
 
 <!--Select2 sender styling-->
